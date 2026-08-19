@@ -1,0 +1,24 @@
+[project]
+name = "digit-classifier"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Abhi", email = "hello@abhirath.net" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "manim>=0.21.0",
+    "numpy>=2.5.2",
+    "opencv-python>=5.0.0.93",
+    "pyqt6>=6.11.0",
+    "torch==2.7.0",
+    "torchvision>=0.22.0",
+]
+
+[project.scripts]
+digit-classifier = "digit_classifier:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
