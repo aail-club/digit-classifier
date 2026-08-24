@@ -3,7 +3,7 @@ import sys
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QLabel, QMainWindow
 
-# from training import Digit_CNN
+from training import Digit_CNN
 
 
 class MainWindow(QMainWindow):
@@ -18,10 +18,11 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(label)
 
 
-app = QApplication(sys.argv)
-
-window = MainWindow()
-
-window.show()
-
-app.exec()
+def main():
+    app = QApplication(sys.argv)
+    
+    window = MainWindow()
+    
+    window.show()
+    
+    app.exec()

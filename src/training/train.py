@@ -1,9 +1,11 @@
 import os
 
 import torch
-from dataset import loaders
-from model import Digit_CNN
+from safetensors.torch import save_file
 from torch import nn, optim
+
+from .dataset import train_loader
+from .model import Digit_CNN
 
 
 def main():
@@ -18,7 +20,7 @@ def main():
     # 10 balances under and over fitting
     for epoch in range(10):
         running_loss = 0.0
-        for idx, (features, labels) in enumerate(loaders["train"]):
+        for idx, (features, labels) in enumerate(train_loader):
             # move features and labels onto the device
             features = features.to(device, non_blocking=True)
             labels = labels.to(
@@ -42,8 +44,6 @@ def main():
 
     if not os.path.exists("weights/"):
         os.makedirs("weights/")
-    torch.save(model.state_dict(), os.path.join("weights/", "cnn.ptn"))
+    save_file(model.state_dict(), os.path.join("weights/", "model.safetensors"))
 
 
-if __name__ == "__main__":
-    main()
