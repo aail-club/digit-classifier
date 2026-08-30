@@ -1,15 +1,16 @@
 import sys
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QLabel, QMainWindow
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QLabel, QMainWindow
 
-from training import Digit_CNN
+from training import DigitCNN
 
 
 class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+
         self.setWindowTitle("hello, world!")
 
         label = QLabel("hello world!!!1")
@@ -20,9 +21,8 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    
+
     window = MainWindow()
-    
     window.show()
-    
+
     app.exec()

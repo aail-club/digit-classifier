@@ -1,3 +1,4 @@
+import json
 import os
 
 import torch
@@ -5,13 +6,22 @@ from safetensors.torch import save_file
 from torch import nn, optim
 
 from .dataset import train_loader
-from .model import Digit_CNN
+from .model import DigitCNN
 
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = Digit_CNN().to(device)
+    with open("config.json") as f:
+        config = json.load(f)
+    
+    model = DigitCNN(
+        input_channels=config["input_channels"],
+        conv_channels=tuple(config["conv_channels"]),
+        num_classes=config["num_classes"],
+        mlp_hidden_size=config["mlp_hidden_size"],
+    ).to(device)
+
     model.train()
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
 
@@ -45,5 +55,4 @@ def main():
     if not os.path.exists("weights/"):
         os.makedirs("weights/")
     save_file(model.state_dict(), os.path.join("weights/", "model.safetensors"))
-
 

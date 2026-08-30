@@ -1,1 +1,5 @@
-from .model import Digit_CNN
+from .model import DigitCNN
+from .train import main
+
+if __name__ == "__main__":
+    main()

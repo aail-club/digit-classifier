@@ -14,3 +14,4 @@ data/
 **/__pycache/
 weights/
 .direnv/
+hf-release/
