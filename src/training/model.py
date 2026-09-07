@@ -10,7 +10,7 @@ class DigitCNN(nn.Module):
     def __init__(
         self,
         input_channels: int = 1,
-        conv_channels: tuple[int, int] = (32, 64),
+        conv_channels: tuple[int, ...] = (32, 64),
         num_classes: int = 10,
         mlp_hidden_size: int = 32,
     ) -> None:

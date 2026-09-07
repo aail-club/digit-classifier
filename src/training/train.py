@@ -1,5 +1,6 @@
 import json
 import os
+from typing import TypedDict
 
 import torch
 from safetensors.torch import save_file
@@ -9,12 +10,41 @@ from .dataset import train_loader
 from .model import DigitCNN
 
 
+class ModelConfig(TypedDict):
+    model_type: str
+    input_channels: int
+    input_size: int
+    num_classes: int
+    conv_channels: list[int]
+    conv_kernel_size: int
+    pool_kernel_size: int
+    use_batch_norm: bool
+    activation: str
+    conv_bias: bool
+    mlp_hidden_size: int
+
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    try:
+        with open("config.json") as f:
+            # config = json.load(f)
+            config: ModelConfig = json.load(f) 
 
-    with open("config.json") as f:
-        config = json.load(f)
-    
+    except FileNotFoundError:
+        config: ModelConfig = {
+            "model_type": "digit_cnn",
+            "input_channels": 1,
+            "input_size": 28,
+            "num_classes": 10,
+            "conv_channels": [32, 64, 128, 256],
+            "conv_kernel_size": 3,
+            "pool_kernel_size": 2,
+            "use_batch_norm": True,
+            "activation": "SiLU",
+            "conv_bias": False,
+            "mlp_hidden_size": 256,
+        }
+
     model = DigitCNN(
         input_channels=config["input_channels"],
         conv_channels=tuple(config["conv_channels"]),
@@ -55,4 +85,3 @@ def main():
     if not os.path.exists("weights/"):
         os.makedirs("weights/")
     save_file(model.state_dict(), os.path.join("weights/", "model.safetensors"))
-
