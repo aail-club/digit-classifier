@@ -10,7 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
     "manim>=0.21.0",
     "numpy>=2.5.2",
-    "opencv-python>=5.0.0.93",
+    "opencv-python-headless>=5.0.0.93",
     "pyside6>=6.11.0",
     "safetensors>=0.8.0",
     "torch==2.7.0",

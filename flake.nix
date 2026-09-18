@@ -66,6 +66,8 @@
                 pkgs.qt6.qtwayland
                 pkgs.wayland
                 pkgs.libxkbcommon
+                pkgs.pkg-config
+                pkgs.ffmpeg
               ]
             }:$LD_LIBRARY_PATH"
             source .venv/bin/activate
