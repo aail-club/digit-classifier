@@ -56,6 +56,7 @@ class VisionWorker(QObject):
                 cv2.MORPH_OPEN,
                 kernel,
             )
+            
 
             # Find digit
             contours, _ = cv2.findContours(
@@ -97,7 +98,8 @@ class VisionWorker(QObject):
                 y : y + h,
                 x : x + w,
             ]
-
+            
+            
             # Preserve aspect ratio when putting into a square canvas
             size = max(w, h)
 

@@ -3,9 +3,7 @@ from torch import nn
 
 
 class DigitCNN(nn.Module):
-    """Convolutional Neural Network (CNN) that classifies hand drawn
-    digits into what numbers it is
-    """
+    """Convolutional neural network for image classification."""
 
     def __init__(
         self,
@@ -13,50 +11,60 @@ class DigitCNN(nn.Module):
         conv_channels: tuple[int, ...] = (32, 64),
         num_classes: int = 10,
         mlp_hidden_size: int = 32,
+        input_size: tuple[int, int] = (28, 28),
     ) -> None:
         super().__init__()
 
-        self.block1 = nn.Sequential(
-            nn.Conv2d(
-                input_channels,
-                conv_channels[0],
-                kernel_size=3,
-                bias=False,
-            ),
-            nn.MaxPool2d(kernel_size=2),
-            nn.BatchNorm2d(conv_channels[0]),
-            nn.SiLU(),
+        if not conv_channels:
+            raise ValueError("conv_channels must contain at least one channel size")
+
+        self.input_channels = input_channels
+        self.conv_channels = conv_channels
+        self.num_classes = num_classes
+        self.mlp_hidden_size = mlp_hidden_size
+        self.input_size = input_size
+
+        blocks = []
+        in_channels = input_channels
+
+        for out_channels in conv_channels:
+            blocks.append(
+                nn.Sequential(
+                    nn.Conv2d(
+                        in_channels,
+                        out_channels,
+                        kernel_size=3,
+                        bias=False,
+                    ),
+                    nn.MaxPool2d(kernel_size=2),
+                    nn.BatchNorm2d(out_channels),
+                    nn.SiLU(),
+                )
+            )
+
+            in_channels = out_channels
+
+        self.features = nn.Sequential(*blocks)
+
+        dummy = torch.zeros(
+            1,
+            input_channels,
+            *input_size,
         )
 
-        self.block2 = nn.Sequential(
-            nn.Conv2d(
-                conv_channels[0],
-                conv_channels[1],
-                kernel_size=3,
-                bias=False,
-            ),
-            nn.MaxPool2d(kernel_size=2),
-            nn.BatchNorm2d(conv_channels[1]),
-            nn.SiLU(),
-        )
-        
-        dummy = torch.zeros(1, input_channels, 28, 28)
         with torch.no_grad():
-            features = self.block2(self.block1(dummy))
+            features = self.features(dummy)
 
         flattened_size = features.flatten(1).shape[1]
 
-        self.mlp = nn.Sequential(
+        self.classifier = nn.Sequential(
             nn.Linear(flattened_size, mlp_hidden_size),
             nn.SiLU(),
             nn.Linear(mlp_hidden_size, num_classes),
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
-        """Performs a forward pass in the neural network"""
-
-        out = self.block1(data)
-        out = self.block2(out)
-        out = self.mlp(out.flatten(1))
-
-        return out
+        """Perform a forward pass through the network."""
+        out = self.features(data)
+        out = out.flatten(1)
+        return self.classifier(out)
