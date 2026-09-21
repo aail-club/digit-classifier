@@ -15,3 +15,5 @@ data/
 weights/
 .direnv/
 hf-release/
+assets/
+media/

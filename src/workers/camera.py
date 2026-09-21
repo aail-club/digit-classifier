@@ -11,12 +11,17 @@ class CameraWorker(QObject):
 
         self.running = True
         self.cap = cv2.VideoCapture(0)
+        self.initialization_error = None
 
         if not self.cap.isOpened():
-            self.error.emit("Could not open camera.")
+            self.initialization_error = "Could not open camera."
 
     @Slot()
     def run(self):
+        if self.initialization_error:
+            self.error.emit(self.initialization_error)
+            return
+
         while self.running:
             ret, frame = self.cap.read()
 
