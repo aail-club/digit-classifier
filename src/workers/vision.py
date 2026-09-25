@@ -1,4 +1,6 @@
+import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -10,6 +12,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 # Only pixels inside this box are used, so shadows, table edges and hands
 # outside the box can no longer be mistaken for the digit.
 GUIDE_BOX_FRACTION = 0.6
+CAPTURE_DATABASE_PATH = Path("data/captures.sqlite3")
 
 
 def guide_box(frame_shape) -> tuple[int, int, int]:
@@ -49,6 +52,7 @@ def binarize(gray: np.ndarray) -> np.ndarray:
 
 @dataclass
 class ProcessedDigit:
+    capture_id: int
     grayscale: np.ndarray
     binary: np.ndarray
     cropped: np.ndarray
@@ -59,12 +63,83 @@ class ProcessedDigit:
 
 class VisionWorker(QObject):
     finished = Signal(object)
+    prediction_saved = Signal(int)
     error = Signal(str)
 
+    def __init__(self):
+        super().__init__()
+        self.database = None
+
+    def get_database(self):
+        if self.database is None:
+            CAPTURE_DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            self.database = sqlite3.connect(CAPTURE_DATABASE_PATH)
+            self.database.execute(
+                """
+                CREATE TABLE IF NOT EXISTS captures (
+                    id INTEGER PRIMARY KEY,
+                    captured_at_us INTEGER NOT NULL,
+                    width INTEGER NOT NULL CHECK (width > 0),
+                    height INTEGER NOT NULL CHECK (height > 0),
+                    bitmap BLOB NOT NULL,
+                    prediction INTEGER CHECK (prediction BETWEEN 0 AND 9),
+                    confidence REAL CHECK (confidence BETWEEN 0.0 AND 1.0)
+                )
+                """
+            )
+
+        return self.database
+
+    def save_capture(self, binary, captured_at_us):
+        if not np.all((binary == 0) | (binary == 255)):
+            raise ValueError("Binarized capture contains non-binary pixels.")
+
+        height, width = binary.shape
+        bitmap = np.packbits(
+            binary.reshape(-1) != 0,
+            bitorder="big",
+        ).tobytes()
+
+        database = self.get_database()
+        with database:
+            cursor = database.execute(
+                """
+                INSERT INTO captures (captured_at_us, width, height, bitmap)
+                VALUES (?, ?, ?, ?)
+                """,
+                (captured_at_us, width, height, bitmap),
+            )
+
+        return cursor.lastrowid
+
+    @Slot(int, int, float)
+    def save_prediction(self, capture_id, prediction, confidence):
+        try:
+            database = self.get_database()
+            with database:
+                database.execute(
+                    """
+                    UPDATE captures
+                    SET prediction = ?, confidence = ?
+                    WHERE id = ?
+                    """,
+                    (prediction, confidence, capture_id),
+                )
+            self.prediction_saved.emit(capture_id)
+        except Exception as e:
+            self.error.emit(str(e))
+
+    @Slot()
+    def close_database(self):
+        if self.database is not None:
+            self.database.close()
+            self.database = None
+
     @Slot(object)
-    def process(self, frame):
+    def process(self, request):
 
         try:
+            frame, captured_at_us = request
             # Grayscale
             gray = cv2.cvtColor(
                 frame,
@@ -87,6 +162,7 @@ class VisionWorker(QObject):
 
             # Binarization + noise removal
             binary = binarize(gray)
+            capture_id = self.save_capture(binary, captured_at_us)
 
             # Find digit
             contours, _ = cv2.findContours(
@@ -209,6 +285,7 @@ class VisionWorker(QObject):
 
             # Result
             result = ProcessedDigit(
+                capture_id=capture_id,
                 grayscale=gray,
                 binary=binary,
                 cropped=contour_debug,

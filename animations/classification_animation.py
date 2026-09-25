@@ -16,14 +16,19 @@ NUM_NEURON_NODES = 7
 IMAGES_PER_DIGIT = 200
 
 
-# We run real MNIST test digits through the trained model and 
-# record what happens inside it, using PyTorch forward hooks.
-
-# filters = channels of the last conv block (64 channels, 5x5 each)
-# neurons = the 256 hidden units in the classifier
-
+# ====================================================================
+# REAL ACTIVATIONS
+#
+# Instead of made-up neurons, we run real MNIST test digits through the
+# trained model and record what actually happens inside it, using
+# PyTorch forward hooks.
+#
+#   filters = channels of the last conv block (64 channels, 5x5 each)
+#   neurons = the 256 hidden units in the classifier
+#
 # Every scene shows the units that contribute most to that digit,
 # averaged over IMAGES_PER_DIGIT test images of it.
+# ====================================================================
 
 
 @lru_cache(maxsize=1)
@@ -153,10 +158,14 @@ class DigitClassificationScene:
     def construct(self):
         self.plan = digit_plan(self.digit)
 
+        # ============================================================
         # LAYERS
         #
         # Symmetric around x = 0:
-        # -3.45 (pixels), -1.15 (strokes), +1.15 (features), +3.45 (outputs)
+        #
+        #   -3.45       -1.15       +1.15       +3.45
+        #    pixels      strokes     features     outputs
+        # ============================================================
 
         input_visual, input_nodes = self.make_long_layer(
             color=WHITE,
@@ -185,7 +194,9 @@ class DigitClassificationScene:
                 buff=0.16,
             )
 
+        # ============================================================
         # LABELS
+        # ============================================================
 
         input_label = Text(
             "pixels",
@@ -223,7 +234,9 @@ class DigitClassificationScene:
             buff=0.32,
         )
 
+        # ============================================================
         # CAMERA
+        # ============================================================
 
         camera_label = Text(
             "camera",
@@ -243,7 +256,9 @@ class DigitClassificationScene:
             max_tip_length_to_length_ratio=0.18,
         )
 
+        # ============================================================
         # CONNECTIONS
+        # ============================================================
 
         pixel_connections = self.connect_layers(
             input_nodes,
@@ -285,7 +300,9 @@ class DigitClassificationScene:
         feature_connections.set_z_index(-1)
         highlighted_output_connections.set_z_index(-1)
 
+        # ============================================================
         # PREDICTION
+        # ============================================================
 
         prediction = Text(
             f"Prediction: {self.digit}",
@@ -305,12 +322,16 @@ class DigitClassificationScene:
             [0, network_bottom - 0.55, 0]
         )
 
+        # ============================================================
         # ACTIVE NODES
+        # ============================================================
 
         active_inputs = self.plan["active_filters"]
         active_hidden = self.plan["active_neurons"]
 
+        # ============================================================
         # ANIMATION
+        # ============================================================
 
         self.play(
             Write(camera_label),
@@ -360,7 +381,9 @@ class DigitClassificationScene:
 
         self.wait(0.7)
 
+        # ============================================================
         # PIXELS -> DETECTED STROKES
+        # ============================================================
 
         self.wait(0.5)
 
@@ -383,7 +406,9 @@ class DigitClassificationScene:
 
         self.wait(0.6)
 
+        # ============================================================
         # STROKES -> FEATURES
+        # ============================================================
 
         self.play(
             LaggedStart(
@@ -404,7 +429,9 @@ class DigitClassificationScene:
 
         self.wait(0.7)
 
+        # ============================================================
         # FEATURES -> OUTPUT
+        # ============================================================
 
         self.play(
             LaggedStart(
@@ -425,7 +452,9 @@ class DigitClassificationScene:
 
         self.wait(0.7)
 
+        # ============================================================
         # FINAL PREDICTION
+        # ============================================================
 
         self.play(
             output_nodes[self.digit]
@@ -448,7 +477,9 @@ class DigitClassificationScene:
 
         self.wait(2.0)
 
+    # ================================================================
     # STANDARD LAYER
+    # ================================================================
 
     def make_layer(self, count, color):
         nodes = VGroup(
@@ -471,7 +502,9 @@ class DigitClassificationScene:
 
         return nodes
 
+    # ================================================================
     # HIGHLIGHTED PIXEL -> STROKE CONNECTIONS
+    # ================================================================
 
     def make_highlighted_pixel_connections(
         self,
@@ -493,7 +526,9 @@ class DigitClassificationScene:
 
         return lines
 
+    # ================================================================
     # ABBREVIATED 784-PIXEL LAYER
+    # ================================================================
 
     def make_long_layer(
         self,
@@ -547,7 +582,9 @@ class DigitClassificationScene:
 
         return visual, nodes
 
+    # ================================================================
     # OUTPUT LAYER
+    # ================================================================
 
     def make_output_layer(self):
         nodes = self.make_layer(
@@ -571,7 +608,9 @@ class DigitClassificationScene:
 
         return nodes, labels
 
+    # ================================================================
     # BASE CONNECTIONS
+    # ================================================================
 
     def connect_layers(
         self,
@@ -594,7 +633,9 @@ class DigitClassificationScene:
 
         return lines
 
+    # ================================================================
     # HIGHLIGHTED CONNECTIONS
+    # ================================================================
 
     def make_highlighted_connections(
         self,
@@ -605,7 +646,9 @@ class DigitClassificationScene:
         feature_lines = VGroup()
         output_lines = VGroup()
 
+        # ------------------------------------------------------------
         # Filters -> neurons (strongest real contributions)
+        # ------------------------------------------------------------
 
         for source, target in self.plan["filter_links"]:
             feature_lines.add(
@@ -618,7 +661,9 @@ class DigitClassificationScene:
                 )
             )
 
+        # ------------------------------------------------------------
         # Neurons -> predicted output
+        # ------------------------------------------------------------
 
         for source in self.plan["active_neurons"]:
             output_lines.add(
@@ -631,7 +676,9 @@ class DigitClassificationScene:
                 )
             )
 
+        # ------------------------------------------------------------
         # Weak competing outputs (the model's real runner-up digits)
+        # ------------------------------------------------------------
 
         for source, other in self.plan["competitor_links"]:
             output_lines.add(
@@ -647,7 +694,9 @@ class DigitClassificationScene:
         return feature_lines, output_lines
 
 
+# ====================================================================
 # SCENES
+# ====================================================================
 
 
 class ClassificationAnimation0(DigitClassificationScene, Scene):

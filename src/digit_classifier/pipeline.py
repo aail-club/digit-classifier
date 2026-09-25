@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 
 import cv2
 import numpy as np
@@ -346,7 +347,9 @@ class ProbabilityCurveWidget(QWidget):
             rect.bottom(),
         )
 
+        # ---------------------------------------------------------
         # REAL model probabilities
+        # ---------------------------------------------------------
 
         values = np.clip(
             self.probabilities,
@@ -354,7 +357,13 @@ class ProbabilityCurveWidget(QWidget):
             1.0,
         )
 
+        # ---------------------------------------------------------
         # PRETTIFIED probabilities used ONLY for the curve
+        # ---------------------------------------------------------
+
+        # Use the real probabilities for the curve too. The old smoothing
+        # invented probability for neighboring digits (e.g. 6 and 8 when the
+        # model said 7), which the model never actually predicted.
         curve_values = values
 
         step = rect.width() / 9
@@ -377,7 +386,9 @@ class ProbabilityCurveWidget(QWidget):
             for i, value in enumerate(curve_values)
         ]
 
+        # ---------------------------------------------------------
         # DRAW CURVE
+        # ---------------------------------------------------------
 
         if curve_points:
 
@@ -420,7 +431,9 @@ class ProbabilityCurveWidget(QWidget):
             painter.setPen(curve_pen)
             painter.drawPath(path)
 
+        # ---------------------------------------------------------
         # DRAW REAL PROBABILITY POINTS
+        # ---------------------------------------------------------
 
         selected = int(np.argmax(values))
 
@@ -533,6 +546,7 @@ def draw_digit_box(frame: np.ndarray) -> np.ndarray:
 class MainWindow(QMainWindow):
     process_requested = Signal(object)
     inference_requested = Signal(object)
+    prediction_ready = Signal(int, int, float)
 
     def __init__(self):
         super().__init__()
@@ -543,6 +557,9 @@ class MainWindow(QMainWindow):
 
         self.latest_frame = None
         self.processing = False
+        self.active_capture_id = None
+        self.prediction_update_pending = False
+        self.close_requested = False
         self.fade_animation = None
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -723,7 +740,7 @@ class MainWindow(QMainWindow):
         founders_layout.addWidget(founders_caption)
         founders_layout.addStretch(1)
 
-        for founder in ("Abhi Agasanakoppa", "Arthur Khrimian"):
+        for founder in ("Abhi Agasanakopa", "Arthur Khrimian"):
             founder_label = QLabel(founder)
             founder_label.setStyleSheet(
                 f"color: {PALETTE['blue_light']}; font-size: 22px; "
@@ -873,8 +890,11 @@ class MainWindow(QMainWindow):
         self.vision_worker = VisionWorker()
         self.vision_worker.moveToThread(self.vision_thread)
         self.process_requested.connect(self.vision_worker.process)
+        self.prediction_ready.connect(self.vision_worker.save_prediction)
         self.vision_worker.finished.connect(self.vision_finished)
+        self.vision_worker.prediction_saved.connect(self.prediction_saved)
         self.vision_worker.error.connect(self.processing_error)
+        self.vision_thread.finished.connect(self.vision_worker.close_database)
         self.vision_thread.start()
 
         self.inference_thread = QThread()
@@ -907,8 +927,10 @@ class MainWindow(QMainWindow):
         if self.latest_frame is None or self.processing:
             return
 
+        captured_at_us = time.time_ns() // 1_000
         captured_frame = self.latest_frame.copy()
         self.processing = True
+        self.active_capture_id = None
         self.predict_button.setEnabled(False)
         self.camera_status_label.setText("Processing...")
         self.camera_label.setPixmap(
@@ -918,10 +940,11 @@ class MainWindow(QMainWindow):
             )
         )
 
-        self.process_requested.emit(captured_frame)
+        self.process_requested.emit((captured_frame, captured_at_us))
 
     @Slot(object)
     def vision_finished(self, result):
+        self.active_capture_id = result.capture_id
         self.inference_requested.emit(result.tensor)
 
     @Slot(int, object)
@@ -930,7 +953,17 @@ class MainWindow(QMainWindow):
         prediction,
         probabilities,
     ):
-        confidence = probabilities[prediction] * 100
+        raw_confidence = float(probabilities[prediction])
+        confidence = raw_confidence * 100
+
+        if self.active_capture_id is not None:
+            self.prediction_update_pending = True
+            self.prediction_ready.emit(
+                self.active_capture_id,
+                prediction,
+                raw_confidence,
+            )
+            self.active_capture_id = None
 
         # Formatting 99.97 with .1f prints "100.0%", which is never true.
         if confidence >= 99.9:
@@ -954,6 +987,12 @@ class MainWindow(QMainWindow):
         self.camera_status_label.setText(f"Ready | Device: {self.device}")
 
         self.switch_screen(self.results_screen)
+
+    @Slot(int)
+    def prediction_saved(self, capture_id):
+        self.prediction_update_pending = False
+        if self.close_requested:
+            self.close()
 
     @Slot(object)
     def update_digit_color(self, color):
@@ -1031,8 +1070,12 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def processing_error(self, message):
         self.processing = False
+        self.prediction_update_pending = False
         self.predict_button.setEnabled(True)
         self.camera_status_label.setText(message)
+
+        if self.close_requested:
+            self.close()
 
     def return_to_camera(self):
         if self.stack.currentWidget() is self.camera_screen:
@@ -1074,6 +1117,11 @@ class MainWindow(QMainWindow):
         self.fade_animation.start()
 
     def closeEvent(self, event):
+        if self.processing or self.prediction_update_pending:
+            self.close_requested = True
+            event.ignore()
+            return
+
         self.stop_results_animations()
         self.camera_worker.stop()
 
