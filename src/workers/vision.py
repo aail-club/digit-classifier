@@ -6,6 +6,47 @@ import torch
 from PySide6.QtCore import QObject, Signal, Slot
 
 
+# Fraction of the shorter frame side used for the on-screen guide box.
+# Only pixels inside this box are used, so shadows, table edges and hands
+# outside the box can no longer be mistaken for the digit.
+GUIDE_BOX_FRACTION = 0.6
+
+
+def guide_box(frame_shape) -> tuple[int, int, int]:
+    """Return (x, y, size) of the centered square guide box."""
+    h, w = frame_shape[:2]
+    size = int(min(h, w) * GUIDE_BOX_FRACTION)
+    return (w - size) // 2, (h - size) // 2, size
+
+
+def binarize(gray: np.ndarray) -> np.ndarray:
+    """Turn a grayscale crop into white-digit-on-black, robust to uneven lighting."""
+    # Adaptive thresholding picks a threshold per neighborhood instead of one
+    # for the whole image, so a shadow across the paper stops mattering.
+    block_size = max(3, (gray.shape[0] // 6) | 1)  # must be odd
+
+    binary = cv2.adaptiveThreshold(
+        gray,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        block_size,
+        10,
+    )
+
+    # Noise removal
+    kernel = np.ones(
+        (3, 3),
+        np.uint8,
+    )
+
+    return cv2.morphologyEx(
+        binary,
+        cv2.MORPH_OPEN,
+        kernel,
+    )
+
+
 @dataclass
 class ProcessedDigit:
     grayscale: np.ndarray
@@ -30,6 +71,13 @@ class VisionWorker(QObject):
                 cv2.COLOR_BGR2GRAY,
             )
 
+            # Only keep the guide box
+            x0, y0, size = guide_box(gray.shape)
+            gray = gray[
+                y0 : y0 + size,
+                x0 : x0 + size,
+            ]
+
             # Blur
             gray = cv2.GaussianBlur(
                 gray,
@@ -37,26 +85,8 @@ class VisionWorker(QObject):
                 0,
             )
 
-            # Binarization
-            _, binary = cv2.threshold(
-                gray,
-                0,
-                255,
-                cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU,
-            )
-
-            # Noise removal
-            kernel = np.ones(
-                (3, 3),
-                np.uint8,
-            )
-
-            binary = cv2.morphologyEx(
-                binary,
-                cv2.MORPH_OPEN,
-                kernel,
-            )
-            
+            # Binarization + noise removal
+            binary = binarize(gray)
 
             # Find digit
             contours, _ = cv2.findContours(

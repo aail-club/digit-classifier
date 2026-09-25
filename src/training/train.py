@@ -6,7 +6,7 @@ import torch
 from safetensors.torch import save_file
 from torch import nn, optim
 
-from .dataset import train_loader
+from .dataset import test_loader, train_loader
 from .model import DigitCNN
 
 
@@ -22,6 +22,24 @@ class ModelConfig(TypedDict):
     activation: str
     conv_bias: bool
     mlp_hidden_size: int
+
+def evaluate(model: nn.Module, device: torch.device) -> float:
+    """Return accuracy on the 10,000 MNIST test images the model never trained on."""
+    model.eval()
+    correct = 0
+    total = 0
+
+    with torch.no_grad():
+        for features, labels in test_loader:
+            features = features.to(device)
+            labels = labels.to(device)
+            predictions = model(features).argmax(dim=1)
+            correct += (predictions == labels).sum().item()
+            total += labels.size(0)
+
+    model.train()
+    return correct / total
+
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -55,7 +73,10 @@ def main():
     model.train()
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
 
-    loss_fn = nn.CrossEntropyLoss()
+    # Label smoothing: instead of training toward 100% on the right digit, train
+    # toward ~91% (0.9 + 0.1 / 10). This stops the model from claiming 100%
+    # confidence on everything.
+    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
 
     # 10 balances under and over fitting
     for epoch in range(10):
@@ -81,6 +102,8 @@ def main():
                     f"Epoch {epoch} | Steps: {idx + 1:<4} | Loss: {running_loss / 375:.3f}"
                 )
                 running_loss = 0.0
+
+        print(f"Epoch {epoch} | Test accuracy: {evaluate(model, device):.2%}")
 
     if not os.path.exists("weights/"):
         os.makedirs("weights/")

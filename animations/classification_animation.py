@@ -1,32 +1,162 @@
 from manim import *
 
 
-DIGIT_FEATURES = {
-    0: [0, 1, 2, 5],
-    1: [1, 3, 5],
-    2: [0, 3, 4, 5],
-    3: [0, 2, 3, 5],
-    4: [1, 2, 3, 4],
-    5: [0, 1, 2, 4],
-    6: [0, 1, 2, 4, 5],
-    7: [0, 3, 5],
-    8: [0, 1, 2, 3, 4, 5],
-    9: [0, 1, 2, 3, 5],
-}
+import sys
+from functools import lru_cache
+from pathlib import Path
+
+import torch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+NUM_PIXEL_NODES = 8  # 4 above + 4 below the ellipsis
+NUM_FILTER_NODES = 6
+NUM_NEURON_NODES = 7
+IMAGES_PER_DIGIT = 200
+
+
+# We run real MNIST test digits through the trained model and 
+# record what happens inside it, using PyTorch forward hooks.
+
+# filters = channels of the last conv block (64 channels, 5x5 each)
+# neurons = the 256 hidden units in the classifier
+
+# Every scene shows the units that contribute most to that digit,
+# averaged over IMAGES_PER_DIGIT test images of it.
+
+
+@lru_cache(maxsize=1)
+def record_activations():
+    from training.dataset import test_dataset
+    from training.inference import load_model
+
+    model = load_model(
+        str(ROOT / "weights" / "model.safetensors"),
+        str(ROOT / "config.json"),
+    )
+
+    activations = {}
+
+    def save(name):
+        def hook(module, inputs, output):
+            activations[name] = output.detach()
+
+        return hook
+
+    model.features[-1].register_forward_hook(save("filters"))
+    model.classifier[1].register_forward_hook(save("neurons"))
+
+    per_digit = []
+
+    for digit in range(10):
+        indices = (test_dataset.targets == digit).nonzero().flatten()
+        images = torch.stack(
+            [test_dataset[i][0] for i in indices[:IMAGES_PER_DIGIT]]
+        )
+
+        with torch.no_grad():
+            probabilities = torch.softmax(model(images), dim=1).mean(dim=0)
+
+        per_digit.append(
+            {
+                "image": images.mean(dim=0)[0],  # (28, 28) average digit
+                "filters": activations["filters"].mean(dim=0),  # (C, 5, 5)
+                "neurons": activations["neurons"].mean(dim=0),  # (256,)
+                "probabilities": probabilities,  # (10,)
+            }
+        )
+
+    return (
+        per_digit,
+        model.classifier[0].weight.detach(),  # filters -> neurons
+        model.classifier[2].weight.detach(),  # neurons -> outputs
+    )
+
+
+def pick_display(scores, num_nodes, num_active):
+    """Show the num_active highest scoring units (highlighted) plus the lowest
+    scoring ones as inactive context, in unit-index order."""
+    order = scores.argsort(descending=True).tolist()
+    active_units = order[:num_active]
+    shown_units = sorted(active_units + order[-(num_nodes - num_active):])
+    active_positions = [shown_units.index(unit) for unit in active_units]
+    return shown_units, active_positions
+
+
+@lru_cache(maxsize=10)
+def digit_plan(digit):
+    per_digit, w_hidden, w_out = record_activations()
+    data = per_digit[digit]
+    filters = data["filters"]
+    num_channels = filters.shape[0]
+
+    # How much each filter -> neuron pair pushes the neuron up:
+    # sum over the 5x5 map of (filter activation x weight).
+    pair = torch.einsum(
+        "cs,ncs->cn",
+        filters.flatten(1),
+        w_hidden.view(w_hidden.shape[0], num_channels, -1),
+    )  # (C, 256)
+
+    # Neurons: activation x weight into this digit's output.
+    neuron_votes = data["neurons"] * w_out[digit]
+    neurons, active_neurons = pick_display(neuron_votes, NUM_NEURON_NODES, 4)
+    top_neurons = [neurons[p] for p in active_neurons]
+
+    # Filters: how much they feed the active neurons.
+    filter_votes = pair[:, top_neurons].sum(dim=1)
+    filters_shown, active_filters = pick_display(filter_votes, NUM_FILTER_NODES, 4)
+
+    # Filter -> neuron links: the 2 strongest positive inputs of each active neuron.
+    filter_links = []
+    for n_pos in active_neurons:
+        strengths = pair[[filters_shown[f] for f in active_filters], neurons[n_pos]]
+        for rank in strengths.argsort(descending=True)[:2].tolist():
+            if strengths[rank] > 0:
+                filter_links.append((active_filters[rank], n_pos))
+
+    # Pixel -> filter links: the 8 pixel nodes stand for 8 horizontal bands of
+    # the image. Link each active filter to the inked bands where it fires most.
+    bands = torch.tensor_split(data["image"], NUM_PIXEL_NODES, dim=0)
+    ink = torch.stack([band.mean() for band in bands])
+    pixel_links = []
+    for f_pos in active_filters:
+        rows = filters[filters_shown[f_pos]].mean(dim=1)  # 5 rows of the 5x5 map
+        band_rows = rows[[b * len(rows) // NUM_PIXEL_NODES for b in range(NUM_PIXEL_NODES)]]
+        score = band_rows * (ink > ink.mean())
+        for band in score.argsort(descending=True)[:2].tolist():
+            if score[band] > 0:
+                pixel_links.append((band, f_pos))
+
+    # Runner-up digits the model also considered (orange lines).
+    probabilities = data["probabilities"].clone()
+    probabilities[digit] = -1
+    runners_up = probabilities.argsort(descending=True)[:2].tolist()
+    competitor_links = []
+    for other in runners_up:
+        votes = torch.stack([data["neurons"][n] * w_out[other][n] for n in neurons])
+        competitor_links.append((int(votes.argmax()), other))
+
+    return {
+        "active_filters": active_filters,
+        "active_neurons": active_neurons,
+        "pixel_links": pixel_links,
+        "filter_links": filter_links,
+        "competitor_links": competitor_links,
+    }
 
 
 class DigitClassificationScene:
     digit = 0
 
     def construct(self):
-        # ============================================================
+        self.plan = digit_plan(self.digit)
+
         # LAYERS
         #
         # Symmetric around x = 0:
-        #
-        #   -3.45       -1.15       +1.15       +3.45
-        #    pixels      strokes     features     outputs
-        # ============================================================
+        # -3.45 (pixels), -1.15 (strokes), +1.15 (features), +3.45 (outputs)
 
         input_visual, input_nodes = self.make_long_layer(
             color=WHITE,
@@ -35,12 +165,12 @@ class DigitClassificationScene:
         input_visual.move_to(LEFT * 4)
 
         strokes_layer = self.make_layer(
-            6,
+            NUM_FILTER_NODES,
             BLUE,
         ).move_to(LEFT * 1.15)
 
         hidden_layer = self.make_layer(
-            7,
+            NUM_NEURON_NODES,
             TEAL,
         ).move_to(RIGHT * 1.15)
 
@@ -55,9 +185,7 @@ class DigitClassificationScene:
                 buff=0.16,
             )
 
-        # ============================================================
         # LABELS
-        # ============================================================
 
         input_label = Text(
             "pixels",
@@ -69,7 +197,7 @@ class DigitClassificationScene:
         )
 
         strokes_label = Text(
-            "strokes",
+            "filters",
             font_size=36,
         ).next_to(
             strokes_layer,
@@ -95,9 +223,7 @@ class DigitClassificationScene:
             buff=0.32,
         )
 
-        # ============================================================
         # CAMERA
-        # ============================================================
 
         camera_label = Text(
             "camera",
@@ -117,9 +243,7 @@ class DigitClassificationScene:
             max_tip_length_to_length_ratio=0.18,
         )
 
-        # ============================================================
         # CONNECTIONS
-        # ============================================================
 
         pixel_connections = self.connect_layers(
             input_nodes,
@@ -161,9 +285,7 @@ class DigitClassificationScene:
         feature_connections.set_z_index(-1)
         highlighted_output_connections.set_z_index(-1)
 
-        # ============================================================
         # PREDICTION
-        # ============================================================
 
         prediction = Text(
             f"Prediction: {self.digit}",
@@ -183,30 +305,12 @@ class DigitClassificationScene:
             [0, network_bottom - 0.55, 0]
         )
 
-        # ============================================================
         # ACTIVE NODES
-        # ============================================================
 
-        active_inputs = DIGIT_FEATURES[self.digit]
+        active_inputs = self.plan["active_filters"]
+        active_hidden = self.plan["active_neurons"]
 
-        active_hidden = sorted(
-            {
-                (feature * 2 + self.digit) % len(hidden_layer)
-                for feature in active_inputs
-            }
-        )
-
-        active_hidden += [
-            index
-            for index in range(len(hidden_layer))
-            if index not in active_hidden
-        ][:2]
-
-        active_hidden = active_hidden[:5]
-
-        # ============================================================
         # ANIMATION
-        # ============================================================
 
         self.play(
             Write(camera_label),
@@ -256,9 +360,7 @@ class DigitClassificationScene:
 
         self.wait(0.7)
 
-        # ============================================================
         # PIXELS -> DETECTED STROKES
-        # ============================================================
 
         self.wait(0.5)
 
@@ -281,9 +383,7 @@ class DigitClassificationScene:
 
         self.wait(0.6)
 
-        # ============================================================
         # STROKES -> FEATURES
-        # ============================================================
 
         self.play(
             LaggedStart(
@@ -304,9 +404,7 @@ class DigitClassificationScene:
 
         self.wait(0.7)
 
-        # ============================================================
         # FEATURES -> OUTPUT
-        # ============================================================
 
         self.play(
             LaggedStart(
@@ -327,9 +425,7 @@ class DigitClassificationScene:
 
         self.wait(0.7)
 
-        # ============================================================
         # FINAL PREDICTION
-        # ============================================================
 
         self.play(
             output_nodes[self.digit]
@@ -352,9 +448,7 @@ class DigitClassificationScene:
 
         self.wait(2.0)
 
-    # ================================================================
     # STANDARD LAYER
-    # ================================================================
 
     def make_layer(self, count, color):
         nodes = VGroup(
@@ -377,9 +471,7 @@ class DigitClassificationScene:
 
         return nodes
 
-    # ================================================================
     # HIGHLIGHTED PIXEL -> STROKE CONNECTIONS
-    # ================================================================
 
     def make_highlighted_pixel_connections(
         self,
@@ -388,36 +480,20 @@ class DigitClassificationScene:
     ):
         lines = VGroup()
 
-        active_strokes = DIGIT_FEATURES[self.digit]
-
-        for stroke_index in active_strokes:
-            pixel_indices = {
-                (stroke_index + self.digit)
-                % len(pixel_nodes),
-
-                (stroke_index * 2 + self.digit)
-                % len(pixel_nodes),
-
-                (stroke_index * 3 + self.digit + 1)
-                % len(pixel_nodes),
-            }
-
-            for pixel_index in pixel_indices:
-                lines.add(
-                    Line(
-                        pixel_nodes[pixel_index].get_right(),
-                        strokes_layer[stroke_index].get_left(),
-                        color=BLUE,
-                        stroke_width=4.2,
-                        stroke_opacity=0.95,
-                    )
+        for pixel_index, stroke_index in self.plan["pixel_links"]:
+            lines.add(
+                Line(
+                    pixel_nodes[pixel_index].get_right(),
+                    strokes_layer[stroke_index].get_left(),
+                    color=BLUE,
+                    stroke_width=4.2,
+                    stroke_opacity=0.95,
                 )
+            )
 
         return lines
 
-    # ================================================================
     # ABBREVIATED 784-PIXEL LAYER
-    # ================================================================
 
     def make_long_layer(
         self,
@@ -471,9 +547,7 @@ class DigitClassificationScene:
 
         return visual, nodes
 
-    # ================================================================
     # OUTPUT LAYER
-    # ================================================================
 
     def make_output_layer(self):
         nodes = self.make_layer(
@@ -497,9 +571,7 @@ class DigitClassificationScene:
 
         return nodes, labels
 
-    # ================================================================
     # BASE CONNECTIONS
-    # ================================================================
 
     def connect_layers(
         self,
@@ -522,9 +594,7 @@ class DigitClassificationScene:
 
         return lines
 
-    # ================================================================
     # HIGHLIGHTED CONNECTIONS
-    # ================================================================
 
     def make_highlighted_connections(
         self,
@@ -532,48 +602,25 @@ class DigitClassificationScene:
         hidden_layer,
         output_layer,
     ):
-        active_inputs = DIGIT_FEATURES[self.digit]
-
         feature_lines = VGroup()
         output_lines = VGroup()
 
-        # ------------------------------------------------------------
-        # Strokes -> hidden features
-        # ------------------------------------------------------------
+        # Filters -> neurons (strongest real contributions)
 
-        for feature in active_inputs:
-            targets = [
-                (feature + self.digit)
-                % len(hidden_layer),
-
-                (feature * 2 + self.digit + 1)
-                % len(hidden_layer),
-            ]
-
-            for target in targets:
-                feature_lines.add(
-                    Line(
-                        input_layer[feature].get_right(),
-                        hidden_layer[target].get_left(),
-                        color=YELLOW,
-                        stroke_width=4.2,
-                        stroke_opacity=0.95,
-                    )
+        for source, target in self.plan["filter_links"]:
+            feature_lines.add(
+                Line(
+                    input_layer[source].get_right(),
+                    hidden_layer[target].get_left(),
+                    color=YELLOW,
+                    stroke_width=4.2,
+                    stroke_opacity=0.95,
                 )
+            )
 
-        # ------------------------------------------------------------
-        # Hidden features -> predicted output
-        # ------------------------------------------------------------
+        # Neurons -> predicted output
 
-        hidden_targets = sorted(
-            {
-                (feature * 2 + self.digit)
-                % len(hidden_layer)
-                for feature in active_inputs
-            }
-        )[:4]
-
-        for source in hidden_targets:
+        for source in self.plan["active_neurons"]:
             output_lines.add(
                 Line(
                     hidden_layer[source].get_right(),
@@ -584,24 +631,13 @@ class DigitClassificationScene:
                 )
             )
 
-        # ------------------------------------------------------------
-        # Weak competing outputs
-        # ------------------------------------------------------------
+        # Weak competing outputs (the model's real runner-up digits)
 
-        nearby_digits = {
-            max(0, self.digit - 1),
-            min(9, self.digit + 1),
-        } - {self.digit}
-
-        for nearby in nearby_digits:
-            source = (
-                nearby + self.digit
-            ) % len(hidden_layer)
-
+        for source, other in self.plan["competitor_links"]:
             output_lines.add(
                 Line(
                     hidden_layer[source].get_right(),
-                    output_layer[nearby].get_left(),
+                    output_layer[other].get_left(),
                     color=ORANGE,
                     stroke_width=2.3,
                     stroke_opacity=0.55,
@@ -611,9 +647,7 @@ class DigitClassificationScene:
         return feature_lines, output_lines
 
 
-# ====================================================================
 # SCENES
-# ====================================================================
 
 
 class ClassificationAnimation0(DigitClassificationScene, Scene):

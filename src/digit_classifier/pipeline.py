@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 from safetensors.torch import load_file
 
 from training import DigitCNN
-from workers import CameraWorker, InferenceWorker, VisionWorker
+from workers import CameraWorker, InferenceWorker, VisionWorker, binarize, guide_box
 
 with open("config.json") as f:
     config = json.load(f)
@@ -346,9 +346,7 @@ class ProbabilityCurveWidget(QWidget):
             rect.bottom(),
         )
 
-        # ---------------------------------------------------------
         # REAL model probabilities
-        # ---------------------------------------------------------
 
         values = np.clip(
             self.probabilities,
@@ -356,11 +354,8 @@ class ProbabilityCurveWidget(QWidget):
             1.0,
         )
 
-        # ---------------------------------------------------------
         # PRETTIFIED probabilities used ONLY for the curve
-        # ---------------------------------------------------------
-
-        curve_values = self.make_curve_probabilities(values)
+        curve_values = values
 
         step = rect.width() / 9
 
@@ -382,9 +377,7 @@ class ProbabilityCurveWidget(QWidget):
             for i, value in enumerate(curve_values)
         ]
 
-        # ---------------------------------------------------------
         # DRAW CURVE
-        # ---------------------------------------------------------
 
         if curve_points:
 
@@ -427,9 +420,7 @@ class ProbabilityCurveWidget(QWidget):
             painter.setPen(curve_pen)
             painter.drawPath(path)
 
-        # ---------------------------------------------------------
         # DRAW REAL PROBABILITY POINTS
-        # ---------------------------------------------------------
 
         selected = int(np.argmax(values))
 
@@ -482,13 +473,23 @@ class ProbabilityCurveWidget(QWidget):
 
 
 def draw_digit_box(frame: np.ndarray) -> np.ndarray:
-    """Draw a best-effort digit bounding box for development previews."""
+    """Draw the guide box and a best-effort digit bounding box inside it."""
 
     preview = frame.copy()
+    x0, y0, size = guide_box(frame.shape)
+
+    # The guide box: only pixels inside it are sent to the model.
+    cv2.rectangle(
+        preview,
+        (x0, y0),
+        (x0 + size - 1, y0 + size - 1),
+        (93, 201, 244),
+        3,
+    )
 
     try:
         gray = cv2.cvtColor(
-            frame,
+            frame[y0 : y0 + size, x0 : x0 + size],
             cv2.COLOR_BGR2GRAY,
         )
         gray = cv2.GaussianBlur(
@@ -496,21 +497,7 @@ def draw_digit_box(frame: np.ndarray) -> np.ndarray:
             (5, 5),
             0,
         )
-        _, binary = cv2.threshold(
-            gray,
-            0,
-            255,
-            cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU,
-        )
-        kernel = np.ones(
-            (3, 3),
-            np.uint8,
-        )
-        binary = cv2.morphologyEx(
-            binary,
-            cv2.MORPH_OPEN,
-            kernel,
-        )
+        binary = binarize(gray)
         contours, _ = cv2.findContours(
             binary,
             cv2.RETR_EXTERNAL,
@@ -531,10 +518,10 @@ def draw_digit_box(frame: np.ndarray) -> np.ndarray:
         x, y, w, h = cv2.boundingRect(contour)
         cv2.rectangle(
             preview,
-            (x, y),
-            (x + w - 1, y + h - 1),
+            (x0 + x, y0 + y),
+            (x0 + x + w - 1, y0 + y + h - 1),
             (255, 180, 80),
-            3,
+            2,
         )
 
     except Exception:
@@ -650,7 +637,7 @@ class MainWindow(QMainWindow):
         demo_title.setObjectName("PageTitle")
         demo_layout.addWidget(demo_title)
 
-        subtitle_text = "Center a single handwritten digit in the frame."
+        subtitle_text = "Hold a single handwritten digit inside the yellow box."
         if DEVELOPMENT_MODE:
             subtitle_text += " Detection guide enabled."
         subtitle = QLabel(subtitle_text)
@@ -736,7 +723,7 @@ class MainWindow(QMainWindow):
         founders_layout.addWidget(founders_caption)
         founders_layout.addStretch(1)
 
-        for founder in ("Abhi Agasanakopa", "Arthur Khrimian"):
+        for founder in ("Abhi Agasanakoppa", "Arthur Khrimian"):
             founder_label = QLabel(founder)
             founder_label.setStyleSheet(
                 f"color: {PALETTE['blue_light']}; font-size: 22px; "
@@ -945,8 +932,18 @@ class MainWindow(QMainWindow):
     ):
         confidence = probabilities[prediction] * 100
 
+        # Formatting 99.97 with .1f prints "100.0%", which is never true.
+        if confidence >= 99.9:
+            confidence_text = ">99.9% confidence"
+        else:
+            confidence_text = f"{confidence:.1f}% confidence"
+
+        # Be honest when the model is unsure (messy digit, bad lighting, no digit).
+        if confidence < 60:
+            confidence_text += " (not sure, try again?)"
+
         self.prediction_label.setText(str(prediction))
-        self.confidence_label.setText(f"{confidence:.1f}% confidence")
+        self.confidence_label.setText(confidence_text)
 
         self.set_prediction_animation(prediction)
         self.probability_curve.set_probabilities(probabilities)
