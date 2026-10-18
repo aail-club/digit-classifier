@@ -36,13 +36,14 @@ def record_activations():
     from torchvision.datasets import MNIST
     from torchvision.transforms import ToTensor
     from training.inference import load_model
+    from digit_classifier.service import weights_path
 
     test_dataset = MNIST(
         root=str(ROOT / "data"), train=False, download=True, transform=ToTensor()
     )
 
     model = load_model(
-        str(ROOT / "weights" / "model.safetensors"),
+        str(weights_path()),
         str(ROOT / "config.json"),
     )
 

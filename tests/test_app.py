@@ -1,9 +1,12 @@
 """Image processing, storage, and Streamlit session regression coverage."""
 import base64
 import json
+import hashlib
+import os
 import sqlite3
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -36,6 +39,11 @@ def checkpoint(tmp_path, monkeypatch):
     config = json.loads((service.ROOT / "config.json").read_text())
     torch.manual_seed(42)
     model = DigitCNN(conv_channels=tuple(config["conv_channels"]), mlp_hidden_size=config["mlp_hidden_size"])
+    # A deterministic UI fixture, not the production model: always choose digit 7.
+    with torch.no_grad():
+        model.classifier[-1].weight.zero_()
+        model.classifier[-1].bias.zero_()
+        model.classifier[-1].bias[7] = 8
     path = tmp_path / "fixture.safetensors"
     save_file(model.state_dict(), path)
     monkeypatch.setenv("MODEL_PATH", str(path))
@@ -131,9 +139,11 @@ def test_bundled_checkpoint_classifies_digit(frame, tmp_path, monkeypatch):
         service.load_model.cache_clear()
 
 
-def test_prerendered_gifs():
+def test_local_prerendered_gifs_if_available():
     for digit in range(10):
         path = service.ROOT / "static/animations" / f"classification_animation_{digit}.gif"
+        if not path.is_file():
+            pytest.skip("Optional local rendering files are not deployed")
         with Image.open(path) as gif:
             assert gif.size == (1920, 1080)
             assert gif.is_animated
@@ -158,10 +168,8 @@ def test_uploaded_bytes_and_phone_orientation(frame):
     assert "Could not read" in service.classify_frame(b"invalid png")["error"]
 
 
-def test_streamlit_flow_does_not_duplicate_inference(tmp_path, monkeypatch):
-    database = tmp_path / "captures.sqlite3"
-    monkeypatch.setenv("MODEL_PATH", str(service.ROOT / "weights/model.safetensors"))
-    monkeypatch.setenv("CAPTURE_DATABASE_PATH", str(database))
+def test_streamlit_flow_does_not_duplicate_inference(checkpoint):
+    database = checkpoint
     service.load_model.cache_clear()
     try:
         app = AppTest.from_file(str(service.ROOT / "app.py"), default_timeout=30).run()
@@ -183,7 +191,8 @@ def test_streamlit_flow_does_not_duplicate_inference(tmp_path, monkeypatch):
         service.load_model.cache_clear()
 
 
-def test_streamlit_recovers_from_missing_model(tmp_path, monkeypatch):
+def test_streamlit_recovers_from_missing_model(tmp_path, monkeypatch, checkpoint):
+    checkpoint_path = os.environ["MODEL_PATH"]
     monkeypatch.setenv("MODEL_PATH", str(tmp_path / "missing.safetensors"))
     monkeypatch.delenv("HF_MODEL_REPO", raising=False)
     service.load_model.cache_clear()
@@ -193,8 +202,31 @@ def test_streamlit_recovers_from_missing_model(tmp_path, monkeypatch):
         assert not app.exception
         assert app.session_state["result"] is None
         assert "Model weights are missing" in app.error[0].value
-        monkeypatch.setenv("MODEL_PATH", str(service.ROOT / "weights/model.safetensors"))
+        monkeypatch.setenv("MODEL_PATH", checkpoint_path)
         app.button(key="classify").click().run()
         assert app.session_state["result"]["digit"] == 7
     finally:
         service.load_model.cache_clear()
+
+
+def test_remote_model_cache_and_integrity(checkpoint, monkeypatch):
+    import copy
+    import huggingface_hub
+    path = Path(os.environ["MODEL_PATH"])
+    monkeypatch.delenv("MODEL_PATH")
+    for key in ("HF_MODEL_REPO", "HF_MODEL_REVISION", "HF_MODEL_FILENAME", "MODEL_SHA256"):
+        monkeypatch.delenv(key, raising=False)
+    assets = copy.deepcopy(service.ASSETS)
+    assets["model"]["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    monkeypatch.setattr(service, "ASSETS", assets)
+    calls = []
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda **kwargs: calls.append(kwargs) or str(path))
+    service.load_model()
+    service.load_model()
+    assert len(calls) == 1
+    assert calls[0]["repo_id"] == "abhirath-a/digit-cnn"
+    assert calls[0]["revision"] == assets["model"]["revision"]
+    assets["model"]["sha256"] = "0" * 64
+    service.load_model.cache_clear()
+    with pytest.raises(service.AssetError, match="SHA-256"):
+        service.load_model()

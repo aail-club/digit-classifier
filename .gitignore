@@ -15,8 +15,7 @@ data/
 .direnv/
 hf-release/
 media/
-weights/*
-!weights/model.safetensors
+weights/
 .pytest_cache/
 .ruff_cache/
 *.log

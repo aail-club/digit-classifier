@@ -1,5 +1,4 @@
 """Streamlit's native widgets, with a small visual layer for the demo's identity."""
-import os
 from pathlib import Path
 
 import altair as alt
@@ -17,11 +16,9 @@ def reset_capture():
 
 
 def apply_secrets():
-    # Community Cloud secrets are optional; local bundled weights need no account.
+    # The public, pinned model and animations work without secrets.
     try:
-        for key in ("MODEL_PATH", "HF_MODEL_REPO", "HF_MODEL_FILENAME", "HF_MODEL_REVISION", "HF_TOKEN", "CAPTURE_DATABASE_PATH"):
-            if key in st.secrets and key not in os.environ:
-                os.environ[key] = str(st.secrets[key])
+        service.apply_settings(st.secrets)
     except st.errors.StreamlitSecretNotFoundError:
         pass
 

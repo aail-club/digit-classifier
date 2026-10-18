@@ -2,6 +2,7 @@
 import base64
 import binascii
 import io
+import hashlib
 import json
 import logging
 import os
@@ -23,6 +24,19 @@ ROOT = Path(__file__).resolve().parents[2]
 LOGGER = logging.getLogger(__name__)
 INFERENCE_LOCK = threading.Lock()
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
+ASSETS = json.loads((ROOT / "deployment-assets.json").read_text(encoding="utf-8"))
+SETTING_KEYS = ("MODEL_PATH", "HF_MODEL_REPO", "HF_MODEL_FILENAME", "HF_MODEL_REVISION",
+                "MODEL_SHA256", "HF_TOKEN", "CAPTURE_DATABASE_PATH")
+
+
+class AssetError(RuntimeError):
+    """An unavailable or incompatible deployed model asset."""
+
+
+def apply_settings(settings):
+    for key in SETTING_KEYS:
+        if key in settings and key not in os.environ:
+            os.environ[key] = str(settings[key])
 
 
 def decode_frame(payload: bytes | str) -> np.ndarray:
@@ -81,22 +95,30 @@ def preview_image(payload):
 
 
 def weights_path():
-    path = Path(os.environ.get("MODEL_PATH", str(ROOT / "weights/model.safetensors")))
-    if path.is_file():
+    local = os.environ.get("MODEL_PATH")
+    if local:
+        path = Path(local)
+        if not path.is_file():
+            raise FileNotFoundError("Model weights are missing at MODEL_PATH. Fix the path or remove this setting to download from Hugging Face.")
         return path
-    repo = os.environ.get("HF_MODEL_REPO")
-    if repo:
-        from huggingface_hub import hf_hub_download
+    from huggingface_hub import hf_hub_download
 
-        return Path(hf_hub_download(
-            repo_id=repo,
-            filename=os.environ.get("HF_MODEL_FILENAME", "model.safetensors"),
-            revision=os.environ.get("HF_MODEL_REVISION", "main"),
-        ))
-    raise FileNotFoundError(
-        "Model weights are missing. Add weights/model.safetensors or set HF_MODEL_REPO "
-        "to a Hugging Face model repository containing compatible weights."
-    )
+    model = ASSETS["model"]
+    repo = os.environ.get("HF_MODEL_REPO", model["repo_id"])
+    filename = os.environ.get("HF_MODEL_FILENAME", model["filename"])
+    revision = os.environ.get("HF_MODEL_REVISION", model["revision"])
+    try:
+        path = Path(hf_hub_download(repo_id=repo, filename=filename, revision=revision,
+                                     token=os.environ.get("HF_TOKEN") or None))
+    except Exception as exc:
+        LOGGER.exception("Model download failed for %s", repo)
+        raise AssetError(f"Could not download the model from {repo}. Check the repository, revision, and network connection; private models also need HF_TOKEN in Streamlit secrets. Then try again.") from exc
+    expected = os.environ.get("MODEL_SHA256")
+    if expected is None and (repo, filename, revision) == (model["repo_id"], model["filename"], model["revision"]):
+        expected = model["sha256"]
+    if expected and hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+        raise AssetError("The downloaded weights do not match the configured SHA-256. Check the pinned model revision and deployment-assets.json.")
+    return path
 
 
 @lru_cache(maxsize=1)
@@ -126,9 +148,7 @@ def confidence_text(confidence):
 
 def animation_data(digit):
     path = ROOT / "static/animations" / f"classification_animation_{digit}.gif"
-    if path.is_file():
-        return f"app/static/animations/{path.name}"
-    return None
+    return f"app/static/animations/{path.name}" if path.is_file() else None
 
 
 def classify_frame(payload):
@@ -161,7 +181,7 @@ def classify_frame(payload):
                 "model_input": processed.tensor[0, 0].cpu().numpy(),
             },
         }
-    except (ValueError, FileNotFoundError) as exc:
+    except (ValueError, FileNotFoundError, AssetError) as exc:
         return {"error": str(exc)}
     except Exception:
         LOGGER.exception("Classification failed")
@@ -169,11 +189,11 @@ def classify_frame(payload):
 
 
 def app_status():
-    # Do not download weights or load torch weights on a page-load status request.
-    local = Path(os.environ.get("MODEL_PATH", str(ROOT / "weights/model.safetensors"))).is_file()
-    available = local or bool(os.environ.get("HF_MODEL_REPO"))
+    # Configuration only: the first prediction downloads weights into the Hub cache.
+    local = os.environ.get("MODEL_PATH")
+    available = Path(local).is_file() if local else bool(os.environ.get("HF_MODEL_REPO", ASSETS["model"]["repo_id"]))
     return {
         "ready": available,
         "device": "cuda" if torch.cuda.is_available() else "cpu",
-        "message": "" if available else "Model weights are missing. Add weights/model.safetensors or configure HF_MODEL_REPO.",
+        "message": "" if available else "Model weights are missing at MODEL_PATH. Remove the setting to use the configured Hugging Face model.",
     }

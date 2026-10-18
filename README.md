@@ -2,7 +2,7 @@
 
 A Streamlit demo that turns a handwritten digit into a prediction, an animated tour of the network, and an explanation of the model input. Built-in MNIST examples make the first run immediate; photo uploads and the browser camera let visitors try their own handwriting.
 
-The original CNN, trained checkpoint, 60% guide crop, image preprocessing, confidence wording, and SQLite capture format are retained. All ten high-quality Manim GIFs and the Inter variable font are bundled. The founders panel remains removed.
+The original CNN, trained checkpoint, 60% guide crop, image preprocessing, confidence wording, and SQLite capture format are retained. The model weights download from [abhirath-a/digit-cnn](https://huggingface.co/abhirath-a/digit-cnn) and are not stored in this GitHub checkout. The existing Manim GIF and Inter setup is unchanged. The founders panel remains removed.
 
 ## Run locally
 
@@ -18,9 +18,9 @@ The camera uses Streamlit's native snapshot widget. Center a digit in the frame,
 
 ## Streamlit Community Cloud
 
-1. Push the **streamlit-rewrite** branch to GitHub, including the Git LFS objects for `weights/model.safetensors` and `static/animations/*.gif`. Streamlit Community Cloud supports Git LFS and downloads these files automatically. After a local clone, use `git lfs pull` if necessary.
+1. Push the **streamlit-rewrite** branch to GitHub, including the existing GIF assets. Do not add a safetensors file: the app fetches it from Hugging Face. Streamlit Community Cloud supports Git LFS for the existing GIFs. After a local clone, use `git lfs pull` if necessary.
 2. At [share.streamlit.io](https://share.streamlit.io), create an app and select your GitHub repository, branch **streamlit-rewrite**, and main file **app.py**.
-3. In Advanced settings, select **Python 3.13**, matching local development, and deploy. No secrets, system packages, GPU, training-data downloads, or animation renderer are needed for the bundled demo.
+3. In Advanced settings, select **Python 3.13**, matching local development, and deploy. No secrets, system packages, GPU, training-data downloads, or animation renderer are needed. The first prediction downloads the small checkpoint; later predictions reuse the cached file and loaded model.
 
 Community Cloud uses the root **uv.lock** and **pyproject.toml** to install the runtime. Linux is explicitly locked to the CPU-only PyTorch wheel through the official PyTorch CPU index, avoiding CUDA downloads. `requirements.txt` has been removed to keep one deployment dependency definition. Training, rendering, and test dependencies are optional extras and are not installed in production.
 
@@ -28,11 +28,28 @@ Community Cloud uses the root **uv.lock** and **pyproject.toml** to install the 
 
 Deployment references: [Community Cloud deployment](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy), [dependency precedence](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/app-dependencies), [Git LFS support](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/file-organization).
 
-### Optional model settings
+### Model hosting and validation
 
-The supplied checkpoint works by default. To use a different compatible checkpoint, set `MODEL_PATH`, or use `HF_MODEL_REPO` with optional `HF_MODEL_FILENAME`, `HF_MODEL_REVISION`, and `HF_TOKEN`. These can be environment variables or Community Cloud secrets; see `.streamlit/secrets.toml.example`. For Hub loading, remove the bundled local checkpoint or point `MODEL_PATH` to a nonexistent path so the Hub fallback is used. Do not commit tokens or `.streamlit/secrets.toml`.
+The model is configured in **deployment-assets.json**:
 
-The runtime architecture is defined by root `config.json` and `src/training/model.py`. Older metadata beside the supplied checkpoint is ignored.
+- Repository: `abhirath-a/digit-cnn`
+- File: `model.safetensors`
+- Revision: `c945f6dfe72db3c8a2219fbfd9e8161c07350361`
+- SHA-256: `c01144b88c53199ea58702c00511fd2e8339c22f6c2cb30719943b176b4412b1`
+
+`hf_hub_download` downloads to the Hugging Face cache, and the loader verifies SHA-256 before loading the model. Only the weights are downloaded; the app never executes `model.py` or `inference.py` from the Hub. A changed remote `main` branch does not change the pinned deployment. Cold starts or Cloud rebuilds may need to download the file again because local storage is ephemeral.
+
+Before deployment, run:
+
+```sh
+uv run python scripts/check_deployment.py
+```
+
+This checks the remote repository, downloads the production weights, verifies the checksum and architecture, and classifies all ten built-in examples. It ignores local `MODEL_PATH` during validation and uses a temporary database, so it cannot pass just because a local checkpoint exists or add records to the demo's database. The GitHub Actions workflow runs tests and this remote-model check on pushes and pull requests.
+
+For optional overrides, use `HF_MODEL_REPO`, `HF_MODEL_FILENAME`, `HF_MODEL_REVISION`, and `MODEL_SHA256` as environment variables or Community Cloud secrets; see `.streamlit/secrets.toml.example`. The public default model needs **no token**. A private model needs a read-only `HF_TOKEN` in Streamlit secrets. `MODEL_PATH` explicitly selects a local file for development; an invalid path produces an error, so remove this setting to restore remote loading. Do not commit tokens or `.streamlit/secrets.toml`.
+
+The runtime architecture is defined by root `config.json` and `src/training/model.py`. If you deploy new weights, update the pinned revision/checksum and rerun the deployment check. `weights/` is ignored by Git. Existing local copies are preserved; removing a file from the current branch does not purge historical Git LFS objects from GitHub. No Git history is rewritten by this change.
 
 ### Captures and persistence
 
