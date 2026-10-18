@@ -12,8 +12,12 @@ wheels/
 data/
 
 **/__pycache/
-weights/
 .direnv/
 hf-release/
-assets/
 media/
+weights/
+.pytest_cache/
+.ruff_cache/
+*.log
+static/animations/.*.rendering.gif
+.streamlit/secrets.toml

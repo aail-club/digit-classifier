@@ -1,1 +1,4 @@
-from .pipeline import main
+def main():
+    from .cli import main as launch
+
+    launch()

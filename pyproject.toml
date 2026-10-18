@@ -1,26 +1,43 @@
 [project]
 name = "digit-classifier"
 version = "0.1.0"
-description = "Add your description here"
+description = "An interactive Streamlit demo of handwritten digit classification"
 readme = "README.md"
 authors = [
     { name = "Abhi", email = "hello@abhirath.net" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.11,<3.14"
 dependencies = [
-    "manim>=0.21.0",
-    "numpy>=2.5.2",
-    "opencv-python-headless>=5.0.0.93",
-    "pyside6>=6.11.0",
-    "safetensors>=0.8.0",
+    "streamlit==1.66.0",
+    "altair>=5.5,<7",
+    "pandas>=2.2,<4",
+    "numpy>=2.1,<3",
+    "opencv-python-headless>=4.11,<5",
+    "pillow>=11,<13",
+    "huggingface-hub>=1,<2",
+    "safetensors>=0.5,<1",
     "torch==2.7.0",
-    "torchvision>=0.22.0",
 ]
+
+[project.optional-dependencies]
+training = ["torchvision==0.22.0"]
+animation = ["manim==0.21.0", "imageio-ffmpeg>=0.6,<0.7"]
+dev = ["pytest>=8"]
+browser = ["playwright>=1.64,<2"]
 
 [project.scripts]
 digit-classifier = "digit_classifier:main"
 training = "training:main"
 
 [build-system]
-requires = ["uv_build>=0.12.3,<0.13.0"]
+requires = ["uv_build>=0.11.29,<0.12"]
 build-backend = "uv_build"
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

@@ -1,0 +1,25 @@
+[server]
+headless = true
+enableStaticServing = true
+maxUploadSize = 8
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "dark"
+primaryColor = "#c9a54b"
+backgroundColor = "#070b14"
+secondaryBackgroundColor = "#101827"
+textColor = "#edf2fa"
+font = "Inter"
+headingFont = "Inter"
+baseRadius = "large"
+buttonRadius = "large"
+showWidgetBorder = true
+
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/fonts/InterVariable.woff2"
+weight = "100 900"
+style = "normal"

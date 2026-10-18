@@ -1,0 +1,8 @@
+{
+  "model": {
+    "repo_id": "abhirath-a/digit-cnn",
+    "revision": "c945f6dfe72db3c8a2219fbfd9e8161c07350361",
+    "filename": "model.safetensors",
+    "sha256": "c01144b88c53199ea58702c00511fd2e8339c22f6c2cb30719943b176b4412b1"
+  }
+}
