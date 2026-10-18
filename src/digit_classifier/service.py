@@ -1,4 +1,4 @@
-"""Inference services shared by Gradio and tests; no desktop dependencies."""
+"""Framework-independent inference and capture storage."""
 import base64
 import binascii
 import io
@@ -9,12 +9,11 @@ import threading
 import time
 from functools import lru_cache
 from pathlib import Path
-from urllib.parse import quote
 
 import cv2
 import numpy as np
 import torch
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from safetensors.torch import load_file
 
 from training.model import DigitCNN
@@ -26,18 +25,27 @@ INFERENCE_LOCK = threading.Lock()
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 
-def decode_frame(payload: str) -> np.ndarray:
-    """Accept bounded browser JPEG/PNG data URLs and return an OpenCV BGR frame."""
-    if not isinstance(payload, str) or len(payload) > MAX_IMAGE_BYTES * 4 // 3 + 100:
-        raise ValueError("Image is too large. Choose an image smaller than 8 MB.")
-    if not payload.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")):
-        raise ValueError("Choose a JPEG or PNG image.")
+def decode_frame(payload: bytes | str) -> np.ndarray:
+    """Accept uploaded bytes or legacy data URLs; orient and bound browser images."""
     try:
-        raw = base64.b64decode(payload.split(",", 1)[1], validate=True)
+        if isinstance(payload, bytes):
+            raw = payload
+        elif isinstance(payload, str) and payload.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")):
+            if len(payload) > MAX_IMAGE_BYTES * 4 // 3 + 100:
+                raise ValueError("Image is too large. Choose an image smaller than 8 MB.")
+            raw = base64.b64decode(payload.split(",", 1)[1], validate=True)
+        else:
+            raise ValueError("Choose a JPEG or PNG image.")
+        if len(raw) > MAX_IMAGE_BYTES:
+            raise ValueError("Image is too large. Choose an image smaller than 8 MB.")
         with Image.open(io.BytesIO(raw)) as image:
+            if image.format not in ("JPEG", "PNG"):
+                raise ValueError("Choose a JPEG or PNG image.")
             if min(image.size) < 32 or max(image.size) > 4096:
                 raise ValueError("Image dimensions must be between 32 and 4096 pixels.")
-            rgb = np.asarray(image.convert("RGB"))
+            image = ImageOps.exif_transpose(image).convert("RGB")
+            image.thumbnail((1280, 1280))
+            rgb = np.asarray(image)
     except (binascii.Error, UnidentifiedImageError, OSError) as exc:
         raise ValueError("Could not read this image. Choose a JPEG or PNG.") from exc
     return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
@@ -58,11 +66,18 @@ def detection_box(frame):
     return [(x0 + x) / width, (y0 + y) / height, w / width, h / height]
 
 
-def preview_frame(payload):
-    try:
-        return {"box": detection_box(decode_frame(payload))}
-    except ValueError:
-        return {"box": None}
+def preview_image(payload):
+    frame = decode_frame(payload)
+    x, y, size = guide_box(frame.shape)
+    guide = frame.copy()
+    cv2.rectangle(guide, (x, y), (x + size - 1, y + size - 1), (93, 201, 244), 3)
+    box = detection_box(frame)
+    if box:
+        height, width = frame.shape[:2]
+        bx, by, bw, bh = box
+        cv2.rectangle(guide, (round(bx * width), round(by * height)),
+                      (round((bx + bw) * width), round((by + bh) * height)), (255, 180, 80), 2)
+    return cv2.cvtColor(guide, cv2.COLOR_BGR2RGB)
 
 
 def weights_path():
@@ -86,6 +101,7 @@ def weights_path():
 
 @lru_cache(maxsize=1)
 def load_model():
+    torch.set_num_threads(min(2, os.cpu_count() or 2))
     config = json.loads((ROOT / "config.json").read_text())
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     size = config.get("input_size", 28)
@@ -109,10 +125,9 @@ def confidence_text(confidence):
 
 
 def animation_data(digit):
-    path = ROOT / "assets" / f"classification_animation_{digit}.gif"
+    path = ROOT / "static/animations" / f"classification_animation_{digit}.gif"
     if path.is_file():
-        # A cacheable static URL avoids copying large HD GIFs into every JSON response.
-        return "gradio_api/file=" + quote(path.as_posix(), safe="/")
+        return f"app/static/animations/{path.name}"
     return None
 
 
@@ -140,6 +155,11 @@ def classify_frame(payload):
             "probabilities": probabilities.tolist(),
             "animation": animation_data(digit),
             "device": str(device),
+            "preprocessing": {
+                "grayscale": processed.grayscale,
+                "binary": processed.binary,
+                "model_input": processed.tensor[0, 0].cpu().numpy(),
+            },
         }
     except (ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}

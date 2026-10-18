@@ -1,76 +1,66 @@
----
-title: MNIST Vision Demo
-emoji: 🔢
-colorFrom: blue
-colorTo: yellow
-sdk: gradio
-sdk_version: 6.30.0
-python_version: "3.13"
-app_file: app.py
-suggested_hardware: cpu-basic
-fullWidth: true
----
+# Digit Vision · Applied AI Lab
 
-# Digit classifier
+A Streamlit demo that turns a handwritten digit into a prediction, an animated tour of the network, and an explanation of the model input. Built-in MNIST examples make the first run immediate; photo uploads and the browser camera let visitors try their own handwriting.
 
-A Gradio rewrite of the Applied AI Lab desktop demo. The camera and results screens retain the original colors, typography, confidence display, smooth probability trace, and digit-specific GIF playback. The founders panel has been removed and the prediction is centered. The browser captures a single unmirrored frame; only the yellow guide box is processed. OpenCV preprocessing, the CNN architecture, and the SQLite capture format are unchanged. An upload option also supports devices without a camera.
+The original CNN, trained checkpoint, 60% guide crop, image preprocessing, confidence wording, and SQLite capture format are retained. All ten high-quality Manim GIFs and the Inter variable font are bundled. The founders panel remains removed.
 
 ## Run locally
 
 ```sh
 uv sync
-uv run digit-classifier
-# Or: uv run python app.py
+uv run streamlit run app.py
+# Or: uv run digit-classifier
 ```
 
-Open `http://localhost:7860` and enable the camera. Remote camera access needs HTTPS; Hugging Face Spaces provides this automatically. Camera permission denial, missing cameras, invalid images, detection failures, and missing weights are shown in the interface. The camera stops on the results screen and when the page closes. “Try another digit” resumes it. Uploaded photos keep their preview when you return.
+Run from the repository root so Streamlit reads `.streamlit/config.toml`. Open http://localhost:8501, choose an example or a photo, and select **Run the network**. Results show the predicted digit, confidence, ten class probabilities, the matching Manim GIF, and expandable preprocessing images. **Try another digit** clears the result and resets input widgets. Reruns do not repeat inference or save duplicate captures.
 
-## Deploy on Hugging Face Spaces
+The camera uses Streamlit's native snapshot widget. Center a digit in the frame, take a photo, then check the yellow guide in the preview before running the network. This version does not draw overlays on the live camera feed. Remote camera access requires HTTPS; Community Cloud provides it. Upload and examples work when camera access is unavailable.
 
-1. Create a **Gradio Space** and upload this repository, including `src/`, `config.json`, `requirements.txt`, `app.py`, and this README. The metadata above selects the SDK, Python version, and entry point. No Qt, display server, system OpenCV packages, or GPU is required.
-2. Include the supplied **`weights/model.safetensors`** when uploading. The app runs with this checkpoint by default. For alternative model storage:
-   - Keep `weights/model.safetensors` with the Space. Weights and GIFs are no longer ignored by Git; `.gitattributes` uses Git LFS for them.
-   - Remove the local checkpoint and set the Space variable `HF_MODEL_REPO` to your model repository (for example `your-name/digit-classifier`). The app downloads `model.safetensors` lazily on the first capture. Set `HF_MODEL_FILENAME` for a different filename, and `HF_MODEL_REVISION` to pin a commit. For a private model, set `HF_TOKEN` as a Space **secret**.
-   - Set `MODEL_PATH` to an existing server-side checkpoint path.
-3. Include `assets/classification_animation_0.gif` through `classification_animation_9.gif`. These are pre-rendered Manim animations at 1920 x 1080 and 60 fps. The predicted digit selects its corresponding GIF; Manim is not installed or run on the Space. The GIFs are served as cacheable files instead of being embedded into inference responses.
-4. Let the Space build, enable the camera, capture a digit, and select “Try another digit.” CPU Basic is sufficient for this small network; CUDA is selected automatically if available.
+## Streamlit Community Cloud
 
-The trained checkpoint is included under `weights/`, and all ten pre-rendered GIFs are included under `assets/`, using Git LFS. When cloning, run `git lfs pull` if your Git client does not download LFS files automatically. The runtime architecture is defined by **root `config.json` and `src/training/model.py`**. Any older model-repository metadata alongside the weights is ignored and is not imported by this app. This rewrite does not substitute random weights or an unrelated classifier. To train a new compatible checkpoint, run `uv sync --extra training` followed by `uv run training` (MNIST download and training happen only when explicitly invoked).
+1. Push the **streamlit-rewrite** branch to GitHub, including the Git LFS objects for `weights/model.safetensors` and `static/animations/*.gif`. Streamlit Community Cloud supports Git LFS and downloads these files automatically. After a local clone, use `git lfs pull` if necessary.
+2. At [share.streamlit.io](https://share.streamlit.io), create an app and select your GitHub repository, branch **streamlit-rewrite**, and main file **app.py**.
+3. In Advanced settings, select **Python 3.13**, matching local development, and deploy. No secrets, system packages, GPU, training-data downloads, or animation renderer are needed for the bundled demo.
 
-### Capture persistence
+Community Cloud uses the root **uv.lock** and **pyproject.toml** to install the runtime. Linux is explicitly locked to the CPU-only PyTorch wheel through the official PyTorch CPU index, avoiding CUDA downloads. `requirements.txt` has been removed to keep one deployment dependency definition. Training, rendering, and test dependencies are optional extras and are not installed in production.
 
-Captures are packed binary crops in `data/captures.sqlite3`, with microsecond timestamps, dimensions, prediction, and raw confidence. The database is private server-side storage and is not served as a Gradio file. Each inference uses its own SQLite connection, and concurrent inferences serialize access to the shared model. Images are not shared between browser sessions.
+`.streamlit/config.toml` enables static serving, an 8 MB upload limit, the dark theme, and the bundled Inter font. Only `static/` is publicly served; the SQLite database and model weights are outside it. The animations are served as GIF files without being base64-encoded into each rerun. Camera images and results stay in each visitor's session; the shared model is loaded once and inference is serialized.
 
-Space filesystem storage is ephemeral by default. If your Space has persistent storage mounted at `/data`, set `CAPTURE_DATABASE_PATH=/data/captures.sqlite3` to retain captures across restarts. Otherwise records disappear when the Space is rebuilt or its filesystem is reset. Configure retention appropriate to your deployment; the app retains the desktop demo's capture logging behavior.
+Deployment references: [Community Cloud deployment](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy), [dependency precedence](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/app-dependencies), [Git LFS support](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/file-organization).
 
-## Development
+### Optional model settings
 
-```sh
-uv sync --extra dev
-uv run pytest
-```
+The supplied checkpoint works by default. To use a different compatible checkpoint, set `MODEL_PATH`, or use `HF_MODEL_REPO` with optional `HF_MODEL_FILENAME`, `HF_MODEL_REVISION`, and `HF_TOKEN`. These can be environment variables or Community Cloud secrets; see `.streamlit/secrets.toml.example`. For Hub loading, remove the bundled local checkpoint or point `MODEL_PATH` to a nonexistent path so the Hub fallback is used. Do not commit tokens or `.streamlit/secrets.toml`.
 
-For browser regression checks, start the app in another terminal, then run:
+The runtime architecture is defined by root `config.json` and `src/training/model.py`. Older metadata beside the supplied checkpoint is ignored.
+
+### Captures and persistence
+
+Submitted captures are stored as packed binary crops in `data/captures.sqlite3`, with microsecond timestamps, dimensions, prediction, and raw confidence. Each inference owns its SQLite connection. Previewing a photo or changing an example does not save it. Community Cloud local storage is ephemeral, so this database is for demonstration rather than durable recordkeeping. `CAPTURE_DATABASE_PATH` changes its location; changing the path does not make Cloud storage persistent.
+
+## Tests
 
 ```sh
 uv sync --extra dev --extra browser
+uv run pytest
+# With the app running in another terminal:
 uv run playwright install chromium
 uv run python tests/browser_smoke.py
 ```
 
-This tests uploads, a synthetic webcam (no real camera access), capture, retry, camera release, probability display, and mobile layouts using the bundled checkpoint. Screenshots are written under `data/browser-check/`.
+Tests cover preprocessing, storage, concurrent inference, checkpoint predictions, invalid inputs, Streamlit session reruns and reset, and all ten complete 1080p GIFs. Browser checks cover the example flow, uploads, a synthetic webcam, GIF delivery, Inter loading, and mobile layout. They do not access a real camera. Screenshots go under ignored `data/browser-check/`.
 
-The application uses Gradio's documented custom HTML component API (`html_template`, `css_template`, `js_on_load`, and `server_functions`) rather than selectors into Gradio internals. Camera frames stay in the browser except for bounded detection previews and submitted captures. The 60% guide crop, adaptive thresholding, morphology, largest-contour selection, 20×20 resizing, 28×28 padding, and foreground centering match the desktop pipeline. The probability curve uses actual softmax values without adding probability to neighboring classes.
-
-The UI bundles Inter's variable font locally (SIL Open Font License in `src/digit_classifier/web/fonts/OFL.txt`), including weights 100–900. No font CDN is required.
-
-`src/training/` retains the training workflow. To regenerate the GIFs individually at high quality, run:
+## Regenerate animations or train
 
 ```sh
-uv sync --extra training --extra animation
+uv sync --extra animation --extra training
 uv run python animations/render_gifs.py
-# Or regenerate one digit:
+# Or a single digit:
 uv run python animations/render_gifs.py --digits 7
+# Train a new compatible checkpoint:
+uv run training
 ```
 
-The renderer uses the bundled Inter font and the supplied checkpoint. The highlighted paths are derived from model activations averaged over 200 MNIST test images per digit, rather than the current camera capture. Generated GIFs loop during playback and restart for each new result. If an asset is removed, the interface shows an explicitly labeled architecture illustration as a fallback. Runtime inference imports neither training datasets nor Manim. `flake.nix` provides an optional Nix development shell.
+Each animation is individually rendered at 1920 × 1080 and 60 fps, then converted into a looping GIF. Highlighted paths are based on model activations averaged over 200 MNIST test images per digit; they describe representative class behavior, not the current camera capture. The renderer and its dataset downloads are never imported by the app. Intermediate movies remain in ignored `media/`.
+
+Inter is served locally from `static/fonts/`; its SIL Open Font License is included there. Built-in examples are derived from MNIST test images; source indices are listed in `static/examples/README.md`.

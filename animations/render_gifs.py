@@ -23,10 +23,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--digits", type=int, nargs="+", default=list(range(10)), choices=range(10))
     args = parser.parse_args()
-    output = ROOT / "assets"
+    output = ROOT / "static/animations"
     output.mkdir(exist_ok=True)
     scenes.torch.set_num_threads(min(4, os.cpu_count() or 4))
-    font = ROOT / "src/digit_classifier/web/fonts/InterVariable.ttf"
+    font = ROOT / "static/fonts/InterVariable.ttf"
     with register_font(str(font)):
         Text.set_default(font="Inter")
         for digit in args.digits:

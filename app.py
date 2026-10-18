@@ -1,12 +1,9 @@
-"""Hugging Face Spaces entry point (also works with `python app.py`)."""
+"""Streamlit Community Cloud entry point: streamlit run app.py."""
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from digit_classifier.app import build_app, main
+from digit_classifier.app import render_app
 
-demo = build_app()
-
-if __name__ == "__main__":
-    main(demo)
+render_app()

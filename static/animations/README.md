@@ -11,4 +11,4 @@ uv run python animations/render_gifs.py
 uv run python animations/render_gifs.py --digits 2 7
 ```
 
-The highlights use the supplied checkpoint's activations averaged over 200 MNIST test images for each digit. They illustrate representative class behavior, rather than the activations of the current webcam frame. The renderer uses the bundled Inter font. MP4 intermediates and palette files stay in the ignored `media/` folder; only the finished GIFs are needed on Hugging Face Spaces. Git LFS stores the GIFs.
+The highlights use the supplied checkpoint's activations averaged over 200 MNIST test images for each digit. They illustrate representative class behavior, rather than the activations of the current webcam frame. The renderer uses the bundled Inter font. MP4 intermediates and palette files stay in the ignored `media/` folder; only the finished GIFs are needed on Streamlit Community Cloud. Git LFS stores the GIFs.

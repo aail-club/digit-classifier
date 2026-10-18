@@ -20,4 +20,5 @@ weights/*
 .pytest_cache/
 .ruff_cache/
 *.log
-assets/.*.rendering.gif
+static/animations/.*.rendering.gif
+.streamlit/secrets.toml

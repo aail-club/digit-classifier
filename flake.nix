@@ -1,5 +1,5 @@
 {
-  description = "Gradio digit classifier";
+  description = "Streamlit digit classifier";
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";

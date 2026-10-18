@@ -1,4 +1,4 @@
 def main():
-    from .app import main as launch
+    from .cli import main as launch
 
     launch()

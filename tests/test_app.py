@@ -1,4 +1,4 @@
-"""Regression coverage for the browser migration, including server transport."""
+"""Image processing, storage, and Streamlit session regression coverage."""
 import base64
 import json
 import sqlite3
@@ -6,17 +6,14 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 
 import cv2
-import gradio as gr
 import numpy as np
 import pytest
 import torch
-from fastapi.testclient import TestClient
-from fastapi import FastAPI
 from safetensors.torch import save_file
 from PIL import Image
+from streamlit.testing.v1 import AppTest
 
 from digit_classifier import service
-from digit_classifier.app import build_app
 from training.model import DigitCNN
 from workers.vision import VisionProcessor, guide_box
 
@@ -113,22 +110,6 @@ def test_confidence_wording(value, expected):
     assert service.confidence_text(value) == expected
 
 
-def test_gradio_component_transport(frame, checkpoint):
-    demo = build_app()
-    app = gr.mount_gradio_app(FastAPI(), demo, path="/")
-    component_id = next(i for i, block in demo.blocks.items() if isinstance(block, gr.HTML))
-    with TestClient(app) as client:
-        assert client.get("/").status_code == 200
-        for name, data in [("app_status", []), ("preview_frame", encode(frame)), ("classify_frame", encode(frame))]:
-            response = client.post("/gradio_api/component_server", json={
-                "component_id": component_id, "session_hash": "regression-test", "fn_name": name, "data": data,
-            })
-            assert response.status_code == 200, response.text
-            result = response.json()
-            assert "error" not in result, result
-        assert client.get("/gradio_api/file=" + str(checkpoint)).status_code == 403
-
-
 def test_inference_does_not_import_training_dataset():
     assert "training.dataset" not in sys.modules
     assert "PySide6" not in sys.modules
@@ -150,22 +131,70 @@ def test_bundled_checkpoint_classifies_digit(frame, tmp_path, monkeypatch):
         service.load_model.cache_clear()
 
 
-def test_prerendered_gifs_and_static_delivery():
-    demo = build_app()
-    app = gr.mount_gradio_app(FastAPI(), demo, path="/")
-    with TestClient(app) as client:
-        for digit in range(10):
-            path = service.ROOT / "assets" / f"classification_animation_{digit}.gif"
-            with Image.open(path) as gif:
-                assert gif.size == (1920, 1080)
-                assert gif.is_animated
-                assert gif.n_frames == 1566
-                assert gif.info.get("loop") == 0
-            with path.open("rb") as stream:
-                stream.seek(-1, 2)
-                assert stream.read(1) == b";"  # Complete GIF trailer after the final frame.
-            url = service.animation_data(digit)
-            assert url.startswith("gradio_api/file=")
-            response = client.get("/" + url, headers={"Range": "bytes=0-5"})
-            assert response.status_code == 206
-            assert response.content == b"GIF89a"
+def test_prerendered_gifs():
+    for digit in range(10):
+        path = service.ROOT / "static/animations" / f"classification_animation_{digit}.gif"
+        with Image.open(path) as gif:
+            assert gif.size == (1920, 1080)
+            assert gif.is_animated
+            assert gif.n_frames == 1566
+            assert gif.info.get("loop") == 0
+        with path.open("rb") as stream:
+            stream.seek(-1, 2)
+            assert stream.read(1) == b";"
+        assert service.animation_data(digit) == f"app/static/animations/{path.name}"
+
+
+def test_uploaded_bytes_and_phone_orientation(frame):
+    import io
+    ok, png = cv2.imencode(".png", frame)
+    assert ok
+    np.testing.assert_array_equal(service.decode_frame(png.tobytes()), frame)
+    exif = Image.Exif()
+    exif[274] = 6
+    stream = io.BytesIO()
+    Image.new("RGB", (80, 40), "white").save(stream, format="JPEG", exif=exif)
+    assert service.decode_frame(stream.getvalue()).shape[:2] == (80, 40)
+    assert "Could not read" in service.classify_frame(b"invalid png")["error"]
+
+
+def test_streamlit_flow_does_not_duplicate_inference(tmp_path, monkeypatch):
+    database = tmp_path / "captures.sqlite3"
+    monkeypatch.setenv("MODEL_PATH", str(service.ROOT / "weights/model.safetensors"))
+    monkeypatch.setenv("CAPTURE_DATABASE_PATH", str(database))
+    service.load_model.cache_clear()
+    try:
+        app = AppTest.from_file(str(service.ROOT / "app.py"), default_timeout=30).run()
+        assert not app.exception
+        assert app.session_state["result"] is None
+        app.button(key="classify").click().run()
+        assert not app.exception
+        assert app.session_state["result"]["digit"] == 7
+        app.run()
+        with sqlite3.connect(database) as db:
+            assert db.execute("SELECT COUNT(*) FROM captures").fetchone()[0] == 1
+        app.button(key="try_again").click().run()
+        assert app.session_state["result"] is None
+        assert app.session_state["input_epoch"] == 1
+        app.radio[0].set_value("Upload a photo").run()
+        assert app.button(key="classify").disabled
+        assert not app.exception
+    finally:
+        service.load_model.cache_clear()
+
+
+def test_streamlit_recovers_from_missing_model(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODEL_PATH", str(tmp_path / "missing.safetensors"))
+    monkeypatch.delenv("HF_MODEL_REPO", raising=False)
+    service.load_model.cache_clear()
+    try:
+        app = AppTest.from_file(str(service.ROOT / "app.py"), default_timeout=30).run()
+        app.button(key="classify").click().run()
+        assert not app.exception
+        assert app.session_state["result"] is None
+        assert "Model weights are missing" in app.error[0].value
+        monkeypatch.setenv("MODEL_PATH", str(service.ROOT / "weights/model.safetensors"))
+        app.button(key="classify").click().run()
+        assert app.session_state["result"]["digit"] == 7
+    finally:
+        service.load_model.cache_clear()
