@@ -12,8 +12,11 @@ wheels/
 data/
 
 **/__pycache/
-weights/
 .direnv/
 hf-release/
-assets/
 media/
+weights/*
+!weights/model.safetensors
+.pytest_cache/
+.ruff_cache/
+*.log
