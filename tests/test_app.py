@@ -13,6 +13,7 @@ import torch
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from safetensors.torch import save_file
+from PIL import Image
 
 from digit_classifier import service
 from digit_classifier.app import build_app
@@ -147,3 +148,24 @@ def test_bundled_checkpoint_classifies_digit(frame, tmp_path, monkeypatch):
         assert result["probabilities"][7] > .99
     finally:
         service.load_model.cache_clear()
+
+
+def test_prerendered_gifs_and_static_delivery():
+    demo = build_app()
+    app = gr.mount_gradio_app(FastAPI(), demo, path="/")
+    with TestClient(app) as client:
+        for digit in range(10):
+            path = service.ROOT / "assets" / f"classification_animation_{digit}.gif"
+            with Image.open(path) as gif:
+                assert gif.size == (1920, 1080)
+                assert gif.is_animated
+                assert gif.n_frames == 1566
+                assert gif.info.get("loop") == 0
+            with path.open("rb") as stream:
+                stream.seek(-1, 2)
+                assert stream.read(1) == b";"  # Complete GIF trailer after the final frame.
+            url = service.animation_data(digit)
+            assert url.startswith("gradio_api/file=")
+            response = client.get("/" + url, headers={"Range": "bytes=0-5"})
+            assert response.status_code == 206
+            assert response.content == b"GIF89a"

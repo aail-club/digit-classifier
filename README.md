@@ -32,10 +32,10 @@ Open `http://localhost:7860` and enable the camera. Remote camera access needs H
    - Keep `weights/model.safetensors` with the Space. Weights and GIFs are no longer ignored by Git; `.gitattributes` uses Git LFS for them.
    - Remove the local checkpoint and set the Space variable `HF_MODEL_REPO` to your model repository (for example `your-name/digit-classifier`). The app downloads `model.safetensors` lazily on the first capture. Set `HF_MODEL_FILENAME` for a different filename, and `HF_MODEL_REVISION` to pin a commit. For a private model, set `HF_TOKEN` as a Space **secret**.
    - Set `MODEL_PATH` to an existing server-side checkpoint path.
-3. Optionally upload `assets/classification_animation_0.gif` through `classification_animation_9.gif` to retain the exact original Manim animations. Without them, an animated, explicitly labeled architecture illustration is displayed. It does not represent measured activations.
+3. Include `assets/classification_animation_0.gif` through `classification_animation_9.gif`. These are pre-rendered Manim animations at 1920 x 1080 and 60 fps. The predicted digit selects its corresponding GIF; Manim is not installed or run on the Space. The GIFs are served as cacheable files instead of being embedded into inference responses.
 4. Let the Space build, enable the camera, capture a digit, and select “Try another digit.” CPU Basic is sufficient for this small network; CUDA is selected automatically if available.
 
-The trained checkpoint was supplied during the rewrite and is included under `weights/`; the rendered GIFs are still optional external assets. The runtime architecture is defined by **root `config.json` and `src/training/model.py`**. Any older model-repository metadata alongside the weights is ignored and is not imported by this app. This rewrite does not substitute random weights or an unrelated classifier. To train a new compatible checkpoint, run `uv sync --extra training` followed by `uv run training` (MNIST download and training happen only when explicitly invoked).
+The trained checkpoint is included under `weights/`, and all ten pre-rendered GIFs are included under `assets/`, using Git LFS. When cloning, run `git lfs pull` if your Git client does not download LFS files automatically. The runtime architecture is defined by **root `config.json` and `src/training/model.py`**. Any older model-repository metadata alongside the weights is ignored and is not imported by this app. This rewrite does not substitute random weights or an unrelated classifier. To train a new compatible checkpoint, run `uv sync --extra training` followed by `uv run training` (MNIST download and training happen only when explicitly invoked).
 
 ### Capture persistence
 
@@ -62,4 +62,15 @@ This tests uploads, a synthetic webcam (no real camera access), capture, retry, 
 
 The application uses Gradio's documented custom HTML component API (`html_template`, `css_template`, `js_on_load`, and `server_functions`) rather than selectors into Gradio internals. Camera frames stay in the browser except for bounded detection previews and submitted captures. The 60% guide crop, adaptive thresholding, morphology, largest-contour selection, 20×20 resizing, 28×28 padding, and foreground centering match the desktop pipeline. The probability curve uses actual softmax values without adding probability to neighboring classes.
 
-`src/training/` retains the training workflow; `animations/classification_animation.py` retains the optional Manim renderer (`uv sync --extra training --extra animation`). Runtime inference imports neither training datasets nor Manim. `flake.nix` provides an optional Nix development shell.
+The UI bundles Inter's variable font locally (SIL Open Font License in `src/digit_classifier/web/fonts/OFL.txt`), including weights 100–900. No font CDN is required.
+
+`src/training/` retains the training workflow. To regenerate the GIFs individually at high quality, run:
+
+```sh
+uv sync --extra training --extra animation
+uv run python animations/render_gifs.py
+# Or regenerate one digit:
+uv run python animations/render_gifs.py --digits 7
+```
+
+The renderer uses the bundled Inter font and the supplied checkpoint. The highlighted paths are derived from model activations averaged over 200 MNIST test images per digit, rather than the current camera capture. Generated GIFs loop during playback and restart for each new result. If an asset is removed, the interface shows an explicitly labeled architecture illustration as a fallback. Runtime inference imports neither training datasets nor Manim. `flake.nix` provides an optional Nix development shell.

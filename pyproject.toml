@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 training = ["torchvision==0.22.0"]
-animation = ["manim>=0.19"]
+animation = ["manim==0.21.0", "imageio-ffmpeg>=0.6,<0.7"]
 dev = ["pytest>=8"]
 browser = ["playwright>=1.64,<2"]
 

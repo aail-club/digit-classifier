@@ -38,11 +38,18 @@ def main():
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
         page.goto(args.url)
+        expect(page.locator(".app-shell")).to_be_visible()
+        page.evaluate("document.fonts.ready")
+        assert page.evaluate("document.fonts.check('400 16px Inter')")
+        page.wait_for_function("[...document.fonts].some(f => f.family === 'Inter' && f.status === 'loaded')")
         page.locator(".file-input").set_input_files(str(photo))
         expect(page.locator(".capture")).to_be_enabled()
         page.locator(".capture").click()
         expect(page.locator(".results-screen")).to_be_visible(timeout=30000)
         expect(page.locator(".prediction")).to_have_text("7")
+        expect(page.locator(".network-gif")).to_be_visible()
+        page.wait_for_function('document.querySelector(".network-gif").naturalWidth === 1920')
+        expect(page.locator(".network-fallback")).to_be_hidden()
         assert page.locator(".founders").count() == 0
         assert page.locator(".probability-table tbody tr").count() == 10
         page.screenshot(path=str(args.output / "results-desktop.png"), full_page=True)

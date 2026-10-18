@@ -20,3 +20,4 @@ weights/*
 .pytest_cache/
 .ruff_cache/
 *.log
+assets/.*.rendering.gif

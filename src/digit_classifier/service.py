@@ -9,6 +9,7 @@ import threading
 import time
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 
 import cv2
 import numpy as np
@@ -107,11 +108,11 @@ def confidence_text(confidence):
     return text
 
 
-@lru_cache(maxsize=10)
 def animation_data(digit):
     path = ROOT / "assets" / f"classification_animation_{digit}.gif"
     if path.is_file():
-        return "data:image/gif;base64," + base64.b64encode(path.read_bytes()).decode()
+        # A cacheable static URL avoids copying large HD GIFs into every JSON response.
+        return "gradio_api/file=" + quote(path.as_posix(), safe="/")
     return None
 
 

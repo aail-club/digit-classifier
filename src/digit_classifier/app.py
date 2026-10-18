@@ -1,4 +1,5 @@
 """Gradio application with a custom HTML component to retain the original UI."""
+import base64
 from pathlib import Path
 
 import gradio as gr
@@ -7,7 +8,11 @@ from . import service
 from .service import classify_frame, preview_frame
 
 WEB = Path(__file__).with_name("web")
-PAGE_CSS = """
+FONT_DATA = base64.b64encode((WEB / "fonts/InterVariable.woff2").read_bytes()).decode()
+PAGE_CSS = (
+    "@font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; "
+    "font-display: swap; src: url(data:font/woff2;base64," + FONT_DATA + ") format('woff2'); }"
+) + """
 html, body, .gradio-container { background: #050914 !important; }
 .gradio-container { max-width: none !important; padding: 0 !important; }
 .gradio-container > .main { padding: 0 !important; }
@@ -21,6 +26,7 @@ def app_status(_args):
 
 
 def build_app():
+    gr.set_static_paths(paths=[service.ROOT / "assets"])
     with gr.Blocks(title="MNIST Vision Demo", analytics_enabled=False) as demo:
         gr.HTML(
             html_template=(WEB / "index.html").read_text(encoding="utf-8"),
