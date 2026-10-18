@@ -101,7 +101,7 @@ def probability_chart(probabilities, digit):
     return alt.Chart(data).mark_bar(cornerRadiusTopLeft=5, cornerRadiusTopRight=5).encode(
         x=alt.X("Digit:N", sort=[str(i) for i in range(10)], title=None, axis=alt.Axis(labelAngle=0)),
         y=alt.Y("Probability:Q", scale=alt.Scale(domain=[0, 100]), title="Probability (%)"),
-        color=alt.condition(alt.datum.Winner, alt.value("#f4c95d"), alt.value("#55bbb0")),
+        color=alt.condition(alt.datum.Winner, alt.value("#c9a54b"), alt.value("#55bbb0")),
         tooltip=[alt.Tooltip("Digit:N"), alt.Tooltip("Probability:Q", format=".2f", title="Probability (%)")],
     ).properties(height=260).configure_view(strokeWidth=0)
 
